@@ -172,3 +172,76 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+archive/
+
+# Data files
+*.csv
+*.parquet
+
+# Node.js / npm
+node_modules/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Environment files
+.env
+.env*.local
+
+# IDE / Editor specific
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Log files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Build outputs (general)
+/dist/
+/build/
+/out/
+
+# Parquet and CSV data files (if they are large and regenerated)
+# Comment these out if you intend to commit smaller/sample versions
+# *.parquet
+# *_cleaned.csv
+# *_cleaned.parquet

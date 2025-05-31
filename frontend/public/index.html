@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en" class="">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tastory - Recipe Search</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" integrity="sha512-Evv84Mr4kqVGRNSgIGL/F/aIDqQb7xQ2vcrdIwxfjThSH8CSR7PBEakCr51Ck+w+/U6swU2Im1vVX0SVk9ABhg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="./style.css?v=2.0">
+</head>
+<body class="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-300">
+    <div class="container mx-auto px-4 py-8 max-w-4xl">
+        <!-- Theme Toggle -->
+        <div class="absolute top-4 right-4">
+            <button id="theme-toggle" class="p-2 rounded-lg group focus:outline-none" aria-label="Toggle theme">
+                <svg class="w-6 h-6 text-gray-600 dark:text-gray-300 group-hover:text-copper-500 dark:group-hover:text-copper-400 transition-colors duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path class="sun-icon" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                    <path class="moon-icon hidden" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+                </svg>
+            </button>
+        </div>
+
+        <!-- Header -->
+        <header class="text-center mb-8">
+            <img src="logo.png" alt="Tastory Logo" class="w-20 h-20 mx-auto mb-4 rounded-full border-4 border-copper-500 dark:border-copper-400">
+            <h1 class="text-4xl font-bold text-copper-500 dark:text-copper-400">Tastory Recipe Search</h1>
+        </header>
+
+        <!-- Search Bar -->
+        <div class="mb-8 relative">
+            <div class="flex rounded-lg overflow-hidden shadow-lg">
+                <input 
+                    type="text" 
+                    id="searchInput" 
+                    placeholder="What recipes are you looking for?"
+                    class="flex-1 px-4 py-3 text-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none"
+                >
+                <button 
+                    id="searchButton"
+                    class="px-6 py-3 bg-copper-500/80 hover:bg-copper-500 text-white font-semibold transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-copper-400 focus:ring-opacity-50"
+                >
+                    Search
+                </button>
+            </div>
+            <div id="suggestionsContainer" class="absolute z-20 w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-b-lg shadow-lg mt-1 hidden">
+                {/* Suggestions will be populated here by JavaScript */}
+            </div>
+        </div>
+
+        <!-- Recent Searches -->
+        <div id="recentSearchesSection" class="mb-8">
+            <h3 class="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-2">Recent Searches</h3>
+            <div id="recentSearchesContainer" class="flex flex-wrap gap-2">
+                <!-- Recent searches will be dynamically inserted here -->
+            </div>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loadingIndicator" class="hidden text-center py-4">
+            <!-- <p class="text-copper-500 dark:text-copper-400 text-lg animate-pulse">Tastory is searching...</p> -->
+            <img src="./logo_animated.gif" alt="Loading..." class="mx-auto w-16 h-16 md:w-20 md:h-20" />
+        </div>
+
+        <!-- Search Results Area -->
+        <div id="searchResultsArea" class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+            <!-- Results will be dynamically inserted here -->
+        </div>
+
+        <!-- Pagination Controls -->
+        <div id="paginationControls" class="mt-8 mb-8 flex justify-center items-center space-x-1 sm:space-x-2">
+            <!-- Pagination buttons will be injected here by script.js -->
+        </div>
+
+    </div>
+
+    <script src="./script.js"></script>
+</body>
+</html> 
