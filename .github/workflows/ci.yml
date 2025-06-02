@@ -1,10 +1,8 @@
 name: CI
 
 on:
-  push:
-    branches: [development, stable, main]
-  pull_request:
-    branches: [development, stable, main]
+  push: # Trigger on every push to any branch
+  workflow_dispatch: # Keep manual triggering option
 
 jobs:
   # Python Backend Tests
@@ -70,7 +68,7 @@ jobs:
 
       - name: Upload coverage reports
         if: matrix.python-version == '3.11'
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
           file: ./coverage.xml
           fail_ci_if_error: false
@@ -127,7 +125,7 @@ jobs:
         run: npm run build
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: frontend-build
           path: frontend/dist/
