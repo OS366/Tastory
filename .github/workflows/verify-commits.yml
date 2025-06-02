@@ -5,6 +5,9 @@ on:
     types: [opened, synchronize]
   push: # Run on all pushes to any branch
 
+permissions:
+  contents: read # Required to checkout code and read commits
+
 jobs:
   verify-commits:
     name: Verify Commit Signatures

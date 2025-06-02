@@ -4,6 +4,11 @@ on:
   push: # Trigger on every push to any branch
   workflow_dispatch: # Keep manual triggering option
 
+permissions:
+  contents: read
+  security-events: write # Required for uploading SARIF results
+  actions: read # Required for workflow run information
+
 jobs:
   # Python Backend Tests
   backend-lint:
@@ -135,6 +140,9 @@ jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     continue-on-error: true # Don't block PR merge for security issues initially
     steps:
       - uses: actions/checkout@v4
@@ -148,10 +156,20 @@ jobs:
           output: "trivy-results.sarif"
 
       - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
+        continue-on-error: true # Don't fail if SARIF upload fails
         with:
           sarif_file: "trivy-results.sarif"
+
+      - name: Display scan results summary
+        if: always()
+        run: |
+          echo "Security scan completed. Check the logs above for any vulnerabilities."
+          if [ -f trivy-results.sarif ]; then
+            echo "SARIF file generated successfully."
+            # You can also parse and display a summary here if needed
+          fi
 
   # Required status check for branch protection
   alls-green:
