@@ -3,26 +3,42 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tastory - Recipe Search</title>
+    <title>Tastory - The Food Search Engine | Find Any Recipe Instantly</title>
+    <meta name="description" content="Tastory is the world's most advanced food search engine. Search 230,000+ recipes by ingredient, cuisine, dietary needs, or cooking time. Powered by AI for instant, accurate results.">
+    <meta name="keywords" content="food search engine, recipe search, cooking search, ingredient search, cuisine search, dietary recipes, meal planning">
+    
+    <!-- Open Graph / Social Media Tags -->
+    <meta property="og:title" content="Tastory - The Food Search Engine">
+    <meta property="og:description" content="Search 230,000+ recipes instantly. The smartest way to find exactly what you want to cook.">
+    <meta property="og:type" content="website">
+    
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" integrity="sha512-Evv84Mr4kqVGRNSgIGL/F/aIDqQb7xQ2vcrdIwxfjThSH8CSR7PBEakCr51Ck+w+/U6swU2Im1vVX0SVk9ABhg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <link rel="stylesheet" href="./style.css?v=2.0">
 </head>
 <body class="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-300">
     <div class="container mx-auto px-4 py-8 max-w-4xl">
-        <!-- Theme Toggle -->
-        <div class="absolute top-4 right-4">
-            <button id="theme-toggle" class="p-2 rounded-lg group focus:outline-none" aria-label="Toggle theme">
-                <svg class="w-6 h-6 text-gray-600 dark:text-gray-300 group-hover:text-copper-500 dark:group-hover:text-copper-400 transition-colors duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path class="sun-icon" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
-                    <path class="moon-icon hidden" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+        <!-- Top Right Buttons -->
+        <div class="absolute top-4 right-6 flex items-center gap-2 z-10">
+            <!-- Favorites Button -->
+            <button id="favorites-button" class="p-2 rounded-lg bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors duration-200 relative group">
+                <i class="fas fa-heart text-red-500 text-xl"></i>
+                <span id="favorites-count" class="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center hidden">0</span>
+            </button>
+            <!-- Theme Toggle -->
+            <button id="theme-toggle" class="p-2 rounded-lg bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors duration-200 group">
+                <svg class="sun-icon w-6 h-6 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                </svg>
+                <svg class="moon-icon w-6 h-6 text-gray-900 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
                 </svg>
             </button>
         </div>
 
         <!-- Header -->
         <header class="text-center mb-8">
-            <img src="logo.png" alt="Tastory Logo" class="w-20 h-20 mx-auto mb-4 rounded-full border-4 border-copper-500 dark:border-copper-400">
-            <h1 class="text-4xl font-bold text-copper-500 dark:text-copper-400">Tastory Recipe Search</h1>
+            <img src="logo.png" alt="Tastory Logo" class="w-20 h-20 mx-auto mb-4 rounded-full border-4 border-gold-500 dark:border-gold-400">
+            <h1 class="text-4xl font-bold text-gold-500 dark:text-gold-400">Discover Stories about Taste</h1>
         </header>
 
         <!-- Search Bar -->
@@ -36,12 +52,12 @@
                 >
                 <button 
                     id="searchButton"
-                    class="px-6 py-3 bg-copper-500/80 hover:bg-copper-500 text-white font-semibold transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-copper-400 focus:ring-opacity-50"
+                    class="px-6 py-3 bg-gold-500/80 hover:bg-gold-500 text-white font-semibold transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-gold-400 focus:ring-opacity-50"
                 >
                     Search
                 </button>
             </div>
-            <div id="suggestionsContainer" class="absolute z-20 w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-b-lg shadow-lg mt-1 hidden">
+            <div id="suggestionsContainer" class="absolute z-50 w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-b-lg shadow-lg mt-1 hidden">
                 {/* Suggestions will be populated here by JavaScript */}
             </div>
         </div>
@@ -68,6 +84,19 @@
         <!-- Pagination Controls -->
         <div id="paginationControls" class="mt-8 mb-8 flex justify-center items-center space-x-1 sm:space-x-2">
             <!-- Pagination buttons will be injected here by script.js -->
+        </div>
+
+        <!-- Favorites Section (initially hidden) -->
+        <div id="favoritesSection" class="hidden">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-gray-100">Your Favorite Recipes</h2>
+                <button id="closeFavorites" class="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100">
+                    <i class="fas fa-times text-2xl"></i>
+                </button>
+            </div>
+            <div id="favoritesGrid" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Favorite recipes will be displayed here -->
+            </div>
         </div>
 
     </div>

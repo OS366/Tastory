@@ -4,6 +4,148 @@
 let currentSearchQuery = '';
 let currentPage = 1;
 
+// --- Global variables for favorites ---
+const FAVORITES_KEY = 'tastoryFavorites';
+
+// --- Favorites Management Functions ---
+function getFavorites() {
+    const favorites = localStorage.getItem(FAVORITES_KEY);
+    return favorites ? JSON.parse(favorites) : {};
+}
+
+function saveFavorites(favorites) {
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
+}
+
+function isRecipeFavorited(recipeId) {
+    const favorites = getFavorites();
+    return favorites.hasOwnProperty(recipeId);
+}
+
+function toggleFavorite(recipeData) {
+    const favorites = getFavorites();
+    const recipeId = recipeData.recipeId;
+    
+    if (favorites[recipeId]) {
+        // Remove from favorites
+        delete favorites[recipeId];
+    } else {
+        // Add to favorites
+        favorites[recipeId] = {
+            id: recipeId,
+            name: recipeData.recipeName,
+            image: recipeData.recipeImage,
+            calories: recipeData.recipeCalories,
+            rating: recipeData.recipeRating,
+            reviews: recipeData.recipeReviews,
+            url: recipeData.recipeUrl,
+            dateAdded: new Date().toISOString()
+        };
+    }
+    
+    saveFavorites(favorites);
+    return !favorites[recipeId]; // Return true if removed, false if added
+}
+
+function updateHeartIcon(button, isFavorited) {
+    const icon = button.querySelector('i');
+    if (icon) {
+        if (isFavorited) {
+            icon.classList.remove('far');
+            icon.classList.add('fas');
+            button.title = 'Remove from favorites';
+        } else {
+            icon.classList.remove('fas');
+            icon.classList.add('far');
+            button.title = 'Add to favorites';
+        }
+    }
+}
+
+function updateFavoritesCount() {
+    const favorites = getFavorites();
+    const count = Object.keys(favorites).length;
+    const countBadge = document.getElementById('favorites-count');
+    
+    if (countBadge) {
+        if (count > 0) {
+            countBadge.textContent = count;
+            countBadge.classList.remove('hidden');
+        } else {
+            countBadge.classList.add('hidden');
+        }
+    }
+}
+
+function displayFavorites() {
+    const favorites = getFavorites();
+    const favoritesGrid = document.getElementById('favoritesGrid');
+    const favoritesSection = document.getElementById('favoritesSection');
+    const searchResultsArea = document.getElementById('searchResultsArea');
+    const paginationControls = document.getElementById('paginationControls');
+    
+    if (!favoritesGrid || !favoritesSection) return;
+    
+    // Hide search results and show favorites
+    if (searchResultsArea) searchResultsArea.classList.add('hidden');
+    if (paginationControls) paginationControls.classList.add('hidden');
+    favoritesSection.classList.remove('hidden');
+    
+    // Clear existing content
+    favoritesGrid.innerHTML = '';
+    
+    const favoritesList = Object.values(favorites);
+    
+    if (favoritesList.length === 0) {
+        favoritesGrid.innerHTML = '<p class="text-center text-gray-500 dark:text-gray-400 col-span-full">No favorite recipes yet. Start by liking some recipes!</p>';
+        return;
+    }
+    
+    // Display each favorite recipe as a simple card
+    favoritesList.forEach(recipe => {
+        const card = document.createElement('div');
+        card.className = 'relative h-80 rounded-lg shadow-lg overflow-hidden group hover:shadow-xl transition-shadow duration-300 cursor-pointer';
+        card.dataset.recipeUrl = recipe.url;
+        
+        card.innerHTML = `
+            ${recipe.image ? `<img src="${recipe.image}" alt="${recipe.name}" class="absolute inset-0 w-full h-full object-cover">` : '<div class="absolute inset-0 w-full h-full bg-gray-400 dark:bg-gray-600"></div>'}
+            <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/60 to-transparent"></div>
+            <div class="relative z-10 flex flex-col h-full p-4 text-white">
+                <h3 class="text-2xl font-bold mb-1 drop-shadow-md">${recipe.name}</h3>
+                <p class="text-sm text-gray-200 drop-shadow-sm">Calories: ${recipe.calories}</p>
+                ${recipe.rating ? `<p class="text-sm text-gray-200 drop-shadow-sm">Rating: ${recipe.rating}/5 ${recipe.reviews ? `(${recipe.reviews} reviews)` : ''}</p>` : ''}
+                <div class="mt-auto">
+                    <button class="remove-favorite-btn bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-colors duration-200" data-recipe-id="${recipe.id}">
+                        <i class="fas fa-heart-broken mr-2"></i>Remove from Favorites
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        // Add click handler to open recipe
+        card.addEventListener('click', (event) => {
+            if (!event.target.closest('.remove-favorite-btn') && recipe.url) {
+                window.open(recipe.url, '_blank');
+            }
+        });
+        
+        favoritesGrid.appendChild(card);
+    });
+    
+    // Add remove handlers
+    document.querySelectorAll('.remove-favorite-btn').forEach(btn => {
+        btn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const recipeId = btn.dataset.recipeId;
+            const favorites = getFavorites();
+            delete favorites[recipeId];
+            saveFavorites(favorites);
+            updateFavoritesCount();
+            displayFavorites(); // Refresh the display
+        });
+    });
+}
+
 // --- Global Timer for Drawer Auto-Close ---
 let drawerCloseTimer = null;
 
@@ -171,6 +313,59 @@ function handleSpeakButtonClick(contentTargetId, buttonElement) {
 
 function addDynamicEventListeners() {
     console.log("[Event Listener Debug] addDynamicEventListeners called");
+
+    // Add click handlers for like buttons
+    document.querySelectorAll('.like-button').forEach(button => {
+        // Check if this recipe is already favorited and update icon
+        const recipeId = button.dataset.recipeId;
+        if (isRecipeFavorited(recipeId)) {
+            updateHeartIcon(button, true);
+        }
+        
+        button.addEventListener('click', (event) => {
+            event.stopPropagation(); // Prevent card click
+            event.preventDefault();
+            
+            const recipeData = {
+                recipeId: button.dataset.recipeId,
+                recipeName: button.dataset.recipeName,
+                recipeImage: button.dataset.recipeImage,
+                recipeCalories: button.dataset.recipeCalories,
+                recipeRating: button.dataset.recipeRating,
+                recipeReviews: button.dataset.recipeReviews,
+                recipeUrl: button.dataset.recipeUrl
+            };
+            
+            const wasRemoved = toggleFavorite(recipeData);
+            updateHeartIcon(button, !wasRemoved);
+            updateFavoritesCount();
+            
+            // Optional: Show a toast notification
+            const message = wasRemoved ? 'Removed from favorites' : 'Added to favorites';
+            console.log(message); // You can replace this with a proper toast notification
+        });
+    });
+
+    // Add click handlers for recipe cards
+    document.querySelectorAll('.recipe-card').forEach(card => {
+        card.addEventListener('click', (event) => {
+            // Check if the click was on a button or inside a button
+            const clickedButton = event.target.closest('button');
+            const clickedLink = event.target.closest('a');
+            
+            // If clicked on a drawer button or link, don't navigate
+            if (clickedButton || clickedLink) {
+                return;
+            }
+            
+            // Get the recipe URL from the data attribute
+            const recipeUrl = card.dataset.recipeUrl;
+            if (recipeUrl) {
+                window.open(recipeUrl, '_blank');
+            }
+        });
+    });
+
     function reattachListener(selector, eventType, handlerFnGenerator) {
         document.querySelectorAll(selector).forEach(element => {
             const newElement = element.cloneNode(true);
@@ -245,7 +440,7 @@ function renderPaginationControls(currentPageNum, totalPagesNum) {
         const pageButton = document.createElement('button');
         pageButton.textContent = i;
         pageButton.className = (i === currentPageNum) ? 
-            'px-3 py-2 sm:px-4 sm:py-2 leading-tight text-copper-600 bg-copper-50 border border-copper-500 rounded-md hover:bg-copper-100 hover:text-copper-700 dark:bg-copper-700 dark:border-copper-600 dark:text-white dark:hover:bg-copper-600 font-semibold z-10' :
+            'px-3 py-2 sm:px-4 sm:py-2 leading-tight text-gold-600 bg-gold-50 border border-gold-500 rounded-md hover:bg-gold-100 hover:text-gold-700 dark:bg-gold-700 dark:border-gold-600 dark:text-white dark:hover:bg-gold-600 font-semibold z-10' :
             'px-3 py-2 sm:px-4 sm:py-2 leading-tight text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-100 hover:text-gray-700 dark:bg-slate-700 dark:border-slate-600 dark:text-gray-300 dark:hover:bg-slate-600 dark:hover:text-white transition-colors duration-150';
         if (i === currentPageNum) pageButton.setAttribute('aria-current', 'page');
         pageButton.addEventListener('click', () => {
@@ -371,10 +566,10 @@ document.addEventListener('DOMContentLoaded', () => {
             termElement.textContent = term;
             termElement.classList.add(
                 'px-3', 'py-1', 'text-sm', 'rounded-full', 'cursor-pointer',
-                'bg-copper-500', 'text-white', 'hover:bg-copper-600',
-                'dark:bg-copper-500', 'dark:text-white', 'dark:hover:bg-copper-400',
+                'bg-gold-500', 'text-white', 'hover:bg-gold-600',
+                'dark:bg-gold-500', 'dark:text-white', 'dark:hover:bg-gold-400',
                 'transition-colors', 'duration-150', 'focus:outline-none',
-                'focus:ring-2', 'focus:ring-copper-400', 'focus:ring-opacity-75'
+                'focus:ring-2', 'focus:ring-gold-400', 'focus:ring-opacity-75'
             );
             termElement.addEventListener('click', () => {
                 searchInput.value = term;
@@ -644,6 +839,29 @@ document.addEventListener('DOMContentLoaded', () => {
     // Call for any initial content if necessary, or ensure it's called after dynamic loads
     addToggleEventListenersToResults(); 
     displayRecentSearches(); // Display recent searches on page load
+    updateFavoritesCount(); // Update favorites count on page load
+
+    // Favorites button click handler
+    const favoritesButton = document.getElementById('favorites-button');
+    const closeFavoritesButton = document.getElementById('closeFavorites');
+    
+    if (favoritesButton) {
+        favoritesButton.addEventListener('click', () => {
+            displayFavorites();
+        });
+    }
+    
+    if (closeFavoritesButton) {
+        closeFavoritesButton.addEventListener('click', () => {
+            const favoritesSection = document.getElementById('favoritesSection');
+            const searchResultsArea = document.getElementById('searchResultsArea');
+            const paginationControls = document.getElementById('paginationControls');
+            
+            if (favoritesSection) favoritesSection.classList.add('hidden');
+            if (searchResultsArea) searchResultsArea.classList.remove('hidden');
+            if (paginationControls) paginationControls.classList.remove('hidden');
+        });
+    }
 
     function addDynamicEventListeners() {
         console.log("[Event Listener Debug] addDynamicEventListeners called");

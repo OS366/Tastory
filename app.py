@@ -80,22 +80,70 @@ def slugify(text):
     text = text.strip('-')
     return text
 
+# --- Helper function to generate star rating HTML ---
+def generate_star_rating(rating):
+    """Generate HTML for star rating display"""
+    if rating is None:
+        return '<span class="text-sm text-gray-400">No rating</span>'
+    
+    try:
+        rating_float = float(rating)
+    except (ValueError, TypeError):
+        return '<span class="text-sm text-gray-400">No rating</span>'
+    
+    # Ensure rating is between 0 and 5
+    rating_float = max(0, min(5, rating_float))
+    
+    # Calculate filled and half stars
+    full_stars = int(rating_float)
+    has_half_star = (rating_float - full_stars) >= 0.5
+    empty_stars = 5 - full_stars - (1 if has_half_star else 0)
+    
+    stars_html = '<span class="inline-flex items-center">'
+    
+    # Add full stars
+    for _ in range(full_stars):
+        stars_html += '<i class="fas fa-star text-gold-500"></i>'
+    
+    # Add half star if needed
+    if has_half_star:
+        stars_html += '<i class="fas fa-star-half-alt text-gold-500"></i>'
+    
+    # Add empty stars
+    for _ in range(empty_stars):
+        stars_html += '<i class="far fa-star text-gold-500/50"></i>'
+    
+    stars_html += '</span>'
+    return stars_html
+
 # --- Routes ---
 @app.route('/')
 def index():
-    return jsonify({"message": "Tastory Chat API is running. Use the /chat endpoint."})
+    return jsonify({
+        "name": "Tastory API",
+        "tagline": "The Food Search Engine",
+        "version": "1.0.0-beta",
+        "endpoints": {
+            "/chat": "Search for recipes using natural language",
+            "/suggest": "Get search suggestions as you type"
+        },
+        "stats": {
+            "total_recipes": "230,000+",
+            "response_time": "<2s",
+            "languages_supported": 6
+        }
+    })
 
-@app.route('/chat', methods=['POST'])
+@app.route('/chat', methods=['POST', 'OPTIONS'])
 def chat():
-    user_message = request.json.get('message')
-    try:
-        page = int(request.json.get('page', 1))
-    except (ValueError, TypeError):
-        page = 1
-    if page < 1:
-        page = 1
-
-    items_per_page = 10
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    # Get the user message and pagination info
+    data = request.get_json()
+    user_message = data.get('message', '')
+    page = data.get('page', 1)
+    per_page = 12  # Fixed at 12 for 4x3 grid
 
     if not user_message:
         return jsonify({'error': 'No message provided'}), 400
@@ -117,14 +165,17 @@ def chat():
     recipes_collection_name = os.getenv('RECIPES_COLLECTION', 'recipes')
     recipes_collection = db[recipes_collection_name]
 
+    # Optimized vector search pipeline - fetch only what we need for the current page
+    skip_amount = (page - 1) * per_page
+    
     vector_search_pipeline = [
         {
             "$vectorSearch": {
                 "index": RECIPE_VECTOR_INDEX_NAME,
                 "queryVector": user_embedding,
                 "path": RECIPE_EMBEDDING_FIELD,
-                "numCandidates": 200, # Fetch more candidates for better sorting before pagination
-                "limit": 100  # Limit initial fetch, pagination happens after Python processing
+                "numCandidates": 20,  # Further reduced for faster search
+                "limit": 15  # Just enough for one page plus a few extra
             }
         },
         {
@@ -134,6 +185,7 @@ def chat():
                 "Name": 1,
                 "Description": 1,
                 "RecipeIngredientParts": 1,
+                "RecipeIngredientQuantities": 1,
                 "RecipeInstructions": 1,
                 "Images": 1,
                 "MainImage": 1,
@@ -145,229 +197,418 @@ def chat():
                 "RecipeYield": 1,
                 "PrepTime": 1,
                 "RecipeCategory": 1,
-                "FatContent": 1, "SaturatedFatContent": 1, "CholesterolContent": 1,
-                "SodiumContent": 1, "CarbohydrateContent": 1, "FiberContent": 1,
-                "SugarContent": 1, "ProteinContent": 1
+                "FatContent": 1, 
+                "SaturatedFatContent": 1, 
+                "CholesterolContent": 1,
+                "SodiumContent": 1, 
+                "CarbohydrateContent": 1, 
+                "FiberContent": 1,
+                "SugarContent": 1, 
+                "ProteinContent": 1,
+                "AggregatedRating": 1,
+                "ReviewCount": 1
             }
+        },
+        # Sort in MongoDB instead of Python for better performance
+        {
+            "$sort": {
+                "search_score": -1
+            }
+        },
+        # Limit results early to avoid processing too much data
+        {
+            "$limit": 30
         }
     ]
 
     try:
-        all_top_candidates = list(recipes_collection.aggregate(vector_search_pipeline, maxTimeMS=30000))
-        print(f"DEBUG: Candidates retrieved from DB for pagination: {len(all_top_candidates)}")
-
+        # Execute the pipeline with a reasonable timeout
+        results = list(recipes_collection.aggregate(vector_search_pipeline, maxTimeMS=15000))
+        
+        # Sort results by image availability - process all results first
         recipes_with_images = []
         recipes_without_images = []
-
-        for recipe_item in all_top_candidates: # Renamed recipe to recipe_item to avoid conflict with outer scope if any
-            image_url_to_use = None
-            main_image_val = recipe_item.get('MainImage')
-            images_val = recipe_item.get('Images')
-            if main_image_val and isinstance(main_image_val, str) and main_image_val.strip().lower().startswith(("http://", "https://")):
-                image_url_to_use = main_image_val.strip()
-            if not image_url_to_use and images_val and isinstance(images_val, list) and len(images_val) > 0:
-                if isinstance(images_val[0], str) and images_val[0].strip().lower().startswith(("http://", "https://")):
-                    image_url_to_use = images_val[0].strip()
+        
+        for recipe in results:
+            # Check if recipe has a valid image
+            has_image = False
+            main_image = recipe.get('MainImage')
+            images = recipe.get('Images', [])
             
-            if image_url_to_use:
-                recipe_item['_display_image_url'] = image_url_to_use 
-                recipes_with_images.append(recipe_item)
+            if main_image and isinstance(main_image, str) and main_image.strip().startswith(("http://", "https://")):
+                has_image = True
+            elif images and isinstance(images, list) and len(images) > 0:
+                if isinstance(images[0], str) and images[0].strip().startswith(("http://", "https://")):
+                    has_image = True
+            
+            if has_image:
+                recipes_with_images.append(recipe)
             else:
-                recipes_without_images.append(recipe_item)
+                recipes_without_images.append(recipe)
         
-        def get_calories_for_sorting(recipe_item_sort):
-            calories_val = recipe_item_sort.get("Calories")
-            if calories_val is None: return float('inf') 
-            try: return float(calories_val)
-            except (ValueError, TypeError): return float('inf')
-
-        sorted_with_images = sorted(recipes_with_images, key=get_calories_for_sorting)
-        sorted_without_images = sorted(recipes_without_images, key=get_calories_for_sorting)
+        # Combine results with images first
+        sorted_results = recipes_with_images + recipes_without_images
         
-        processed_results = sorted_with_images + sorted_without_images
-        total_processed_results = len(processed_results)
-        total_pages = math.ceil(total_processed_results / items_per_page)
-        if page > total_pages and total_pages > 0: # Adjust page if out of bounds
-            page = total_pages
+        # Quick count for total pages (estimate based on sorted results)
+        total_results = len(sorted_results)
+        total_pages = max(1, min(3, math.ceil(total_results / per_page)))  # Cap at 3 pages for performance
         
-        start_index = (page - 1) * items_per_page
-        end_index = start_index + items_per_page
-        paginated_results = processed_results[start_index:end_index]
+        # Get the recipes for current page
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        page_results = sorted_results[start_idx:end_idx]
         
-        print(f"DEBUG: Total processed results: {total_processed_results}, Page: {page}, Total Pages: {total_pages}, Displaying {len(paginated_results)} items")
-        
-        bot_reply = ""
-        if not paginated_results:
-            if page == 1: # Only show no results message if it's the first page and nothing came through
-                 bot_reply = "I couldn\'t find any recipes matching your query. Try phrasing it differently!"
-            else: # On subsequent pages, if empty, means user paged too far (though we try to cap page number)
-                 bot_reply = "<p class='text-center text-gray-500 dark:text-gray-400'>No more results on this page.</p>"
-        else:
-            for i, recipe in enumerate(paginated_results): # Iterate over paginated_results
-                recipe_unique_id = recipe.get('RecipeId', f"page{page}_{i}") # Ensure unique IDs across pages too
-                recipe_id_str = str(recipe.get('RecipeId', ''))
-                recipe_name = recipe.get('Name', 'Recipe')
-                recipe_slug = slugify(recipe_name)
-                current_image_url = recipe.get('_display_image_url') 
-                bot_reply += f'<div class="relative h-80 rounded-lg shadow-lg overflow-hidden group hover:shadow-xl transition-shadow duration-300">'
-                if current_image_url:
-                    bot_reply += f'<img src="{current_image_url}" alt="{recipe.get("Name", "N/A")}" class="absolute inset-0 w-full h-full object-cover">'
-                else: 
-                    bot_reply += '<div class="absolute inset-0 w-full h-full bg-gray-400 dark:bg-gray-600 flex items-center justify-center"><p class=\"text-gray-600 dark:text-gray-400 text-sm\">No Image</p></div>'
-                bot_reply += '<div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/60 to-transparent"></div>'
-                bot_reply += '<div class="relative z-10 flex flex-col h-full p-4 text-white">'
-                bot_reply += f'<h3 class="text-2xl font-bold mb-1 drop-shadow-md">{recipe.get("Name", "N/A")}</h3>'
-                calories = recipe.get('Calories')
-                calories_display = "N/A"
-                if calories is not None:
-                    try: calories_display = f"{float(calories):.0f}"
-                    except (ValueError, TypeError): calories_display = str(calories)
-                bot_reply += f'<p class="text-sm text-gray-200 mb-3 drop-shadow-sm">Calories: {calories_display}</p>'
-                bot_reply += '<div class="mt-auto">' 
-                bot_reply += '<div class="flex flex-wrap justify-center items-center gap-4 mb-2 w-full">' 
-                icon_base_classes = "text-4xl text-white/80 hover:text-white opacity-100 transition-opacity duration-200 cursor-pointer drop-shadow-sm"
-                drawer_id_info = f"drawer-info-{recipe_unique_id}"
-                content_id_info = f"content-info-{recipe_unique_id}"
-                drawer_id_ingredients = f"drawer-ingredients-{recipe_unique_id}"
-                content_id_ingredients = f"content-ingredients-{recipe_unique_id}"
-                drawer_id_instructions = f"drawer-instructions-{recipe_unique_id}"
-                content_id_instructions = f"content-instructions-{recipe_unique_id}"
-                drawer_id_nutrition = f"drawer-nutrition-{recipe_unique_id}"
-                content_id_nutrition = f"content-nutrition-{recipe_unique_id}"
-                bot_reply += f'<button class="{icon_base_classes}" data-drawer-target="{drawer_id_info}" title="Info"><i class="fas fa-info-circle"></i></button>'
-                bot_reply += f'<button class="{icon_base_classes}" data-drawer-target="{drawer_id_ingredients}" title="Ingredients"><i class="fas fa-apple-alt"></i></button>'
-                bot_reply += f'<button class="{icon_base_classes}" data-drawer-target="{drawer_id_instructions}" title="Instructions"><i class="fas fa-book-open"></i></button>'
-                bot_reply += f'<button class="{icon_base_classes}" data-drawer-target="{drawer_id_nutrition}" title="Nutrition"><i class="fas fa-chart-pie"></i></button>'
-                if recipe_id_str: food_com_url = f"https://www.food.com/recipe/{recipe_slug}-{recipe_id_str}"; bot_reply += f'<a href="{food_com_url}" target="_blank" class="{icon_base_classes}" title="View on Food.com"><i class="fas fa-external-link-alt"></i></a>'
-                bot_reply += '</div>' 
-                bot_reply += '</div>' 
-                bot_reply += '</div>' 
-                drawer_classes = "fixed top-0 right-0 h-full w-80 bg-slate-800/90 dark:bg-black/90 backdrop-blur-lg shadow-2xl p-6 text-gray-100 transform translate-x-full transition-transform duration-300 ease-in-out z-40 overflow-y-auto"
-                bot_reply += f'<div id="{drawer_id_info}" class="{drawer_classes}">'
-                bot_reply += f'    <div class="flex items-center justify-between mb-4"> <h4 class="text-xl font-semibold text-white mr-2 flex-grow">Recipe Information</h4> <button class="speak-drawer-button text-gray-300 hover:text-white text-xl mr-3" title="Read content aloud" data-content-target="{content_id_info}"><i class="fas fa-volume-up"></i></button> <button data-close-drawer="{drawer_id_info}" class="text-gray-300 hover:text-white text-3xl leading-none">&times;</button> </div>'
-                bot_reply += f'    <div id="{content_id_info}" class="drawer-readable-content space-y-2 text-sm">'
-                bot_reply += f'        <p><span class="font-semibold">Author:</span> {recipe.get("AuthorName", "N/A")}</p>'
-                date_published_val = recipe.get('DatePublished')
-                date_str = "N/A"
-                if date_published_val:
-                    if isinstance(date_published_val, datetime.datetime): date_str = date_published_val.strftime('%Y-%m-%d')
-                    elif isinstance(date_published_val, str):
-                        try: date_str = datetime.datetime.fromisoformat(date_published_val.replace('Z', '+00:00')).strftime('%Y-%m-%d')
-                        except ValueError: date_str = date_published_val
-                    else: date_str = str(date_published_val)
-                bot_reply += f'        <p><span class="font-semibold">Published:</span> {date_str}</p>'
-                servings = recipe.get('RecipeServings')
-                recipe_yield = recipe.get('RecipeYield')
-                serv_yield_str = "N/A"
-                if servings is not None and str(servings).lower() != 'nan' and str(servings).strip() and str(servings) != 'character(0)': serv_yield_str = str(servings)
-                elif recipe_yield and str(recipe_yield).lower() != 'nan' and str(recipe_yield).strip() and str(recipe_yield) != 'character(0)': serv_yield_str = str(recipe_yield)
-                bot_reply += f'        <p><span class="font-semibold">Servings/Yield:</span> {serv_yield_str}</p>'
-                prep_time = recipe.get('PrepTime')
-                prep_time_str = "N/A"
-                if prep_time is not None and str(prep_time).lower() != 'nan': prep_time_str = f"{prep_time} minutes"
-                bot_reply += f'        <p><span class="font-semibold">Prep Time:</span> {prep_time_str}</p>'
-                category = recipe.get('RecipeCategory')
-                category_str = "N/A"
-                if category: category_str = category[0] if isinstance(category, list) and category else (category if isinstance(category, str) else 'N/A')
-                bot_reply += f'        <p><span class="font-semibold">Category:</span> {category_str}</p>'
-                bot_reply += f'    </div>' # Close content_id_info
-                bot_reply += f'</div>' # Close drawer_id_info
-
-                bot_reply += f'<div id="{drawer_id_ingredients}" class="{drawer_classes}">'
-                bot_reply += f'    <div class="flex items-center justify-between mb-4"> <h4 class="text-xl font-semibold text-white mr-2 flex-grow">Ingredients</h4> <button class="speak-drawer-button text-gray-300 hover:text-white text-xl mr-3" title="Read content aloud" data-content-target="{content_id_ingredients}"><i class="fas fa-volume-up"></i></button> <button data-close-drawer="{drawer_id_ingredients}" class="text-gray-300 hover:text-white text-3xl leading-none">&times;</button> </div>'
-                bot_reply += f'    <div id="{content_id_ingredients}" class="drawer-readable-content">'
-                ingredients_data = recipe.get('RecipeIngredientParts')
-                ingredients_str_html = '<p class="text-sm">N/A</p>' # Default value
-                actual_ingredients_list = None
-
-                if isinstance(ingredients_data, list):
-                    actual_ingredients_list = ingredients_data
-                elif isinstance(ingredients_data, str):
-                    if ingredients_data.strip().startswith('[') and ingredients_data.strip().endswith(']'):
-                        try:
-                            parsed_list = json.loads(ingredients_data)
-                            if isinstance(parsed_list, list):
-                                actual_ingredients_list = parsed_list
-                        except json.JSONDecodeError:
-                            # If JSON parsing fails for a string that looks like a list, treat it as a single string ingredient
-                            if ingredients_data.strip(): # ensure it's not empty after strip
-                                ingredients_str_html = f'<p class="text-sm">{ingredients_data}</p>'
-                            # else, default N/A remains
-                    elif ingredients_data.strip(): # If it's a non-empty string not appearing to be a list
-                        ingredients_str_html = f'<p class="text-sm">{ingredients_data}</p>'
-                    # else, (empty string or only whitespace) default N/A remains
-
-                if actual_ingredients_list is not None: # This means it was successfully parsed as a list or was a list originally
-                    if actual_ingredients_list: # Check if the list is not empty
-                        li_items = "".join([f'<li>{str(ing)}</li>' for ing in actual_ingredients_list if ing and str(ing).strip()])
-                        if li_items: # If any valid list items were generated
-                            ingredients_str_html = f'<ul class="list-disc list-inside space-y-1 text-sm">{li_items}</ul>'
-                        else: # All items were empty or invalid
-                            ingredients_str_html = '<p class="text-sm">No ingredients listed.</p>'
-                    else: # The list was empty
-                        ingredients_str_html = '<p class="text-sm">No ingredients listed.</p>'
-                # If actual_ingredients_list is None, ingredients_str_html has already been set (either to N/A or the string content)
-
-                bot_reply += ingredients_str_html
-                bot_reply += f'    </div>' # Close content_id_ingredients
-                bot_reply += f'</div>' # Close drawer_id_ingredients
-
-                bot_reply += f'<div id="{drawer_id_instructions}" class="{drawer_classes}">'
-                bot_reply += f'    <div class="flex items-center justify-between mb-4"> <h4 class="text-xl font-semibold text-white mr-2 flex-grow">Instructions</h4> <button class="speak-drawer-button text-gray-300 hover:text-white text-xl mr-3" title="Read content aloud" data-content-target="{content_id_instructions}"><i class="fas fa-volume-up"></i></button> <button data-close-drawer="{drawer_id_instructions}" class="text-gray-300 hover:text-white text-3xl leading-none">&times;</button> </div>'
-                bot_reply += f'    <div id="{content_id_instructions}" class="drawer-readable-content">'
-                bot_reply += f'        <ol class="list-decimal list-inside space-y-1 text-sm">'
-                instructions_data = recipe.get('RecipeInstructions', [])
-                parsed_instructions = []
-                if isinstance(instructions_data, list): parsed_instructions = instructions_data
-                elif isinstance(instructions_data, str):
+        # Convert to simple JSON format instead of HTML
+        recipes_data = []
+        for recipe in page_results:
+            # Extract image URL
+            image_url = None
+            main_image = recipe.get('MainImage')
+            images = recipe.get('Images', [])
+            
+            if main_image and isinstance(main_image, str) and main_image.strip().startswith(("http://", "https://")):
+                image_url = main_image.strip()
+            elif images and isinstance(images, list) and len(images) > 0:
+                if isinstance(images[0], str) and images[0].strip().startswith(("http://", "https://")):
+                    image_url = images[0].strip()
+            
+            # Process ingredients
+            ingredients = []
+            ingredients_data = recipe.get('RecipeIngredientParts')
+            quantities_data = recipe.get('RecipeIngredientQuantities')
+            
+            if isinstance(ingredients_data, list):
+                # If we have quantities, combine them with ingredients
+                if isinstance(quantities_data, list):
+                    for i, ing in enumerate(ingredients_data):
+                        if ing and str(ing).strip():
+                            if i < len(quantities_data) and quantities_data[i]:
+                                quantity = str(quantities_data[i]).strip()
+                                # Skip NA, N/A, None, or similar non-quantity values
+                                if quantity.upper() in ['NA', 'N/A', 'NONE', 'NULL', '']:
+                                    ingredients.append(str(ing))
+                                else:
+                                    # Combine quantity with ingredient
+                                    ingredients.append(f"{quantity} {ing}")
+                            else:
+                                # No quantity for this ingredient
+                                ingredients.append(str(ing))
+                else:
+                    # No quantities available, just use ingredients as is
+                    ingredients = [str(ing) for ing in ingredients_data if ing and str(ing).strip()]
+            elif isinstance(ingredients_data, str):
+                if ingredients_data.strip().startswith('['):
                     try:
-                        parsed_instructions = json.loads(instructions_data)
-                        if not isinstance(parsed_instructions, list): parsed_instructions = [str(instructions_data)]
-                    except json.JSONDecodeError: parsed_instructions = [instructions_data]
-                if parsed_instructions:
-                    for step in parsed_instructions: bot_reply += f'<li>{step}</li>'
-                else: bot_reply += '<li>No instructions provided.</li>'
-                bot_reply += f'        </ol>'
-                bot_reply += f'    </div>' # Close content_id_instructions
-                bot_reply += f'</div>' # Close drawer_id_instructions
-
-                bot_reply += f'<div id="{drawer_id_nutrition}" class="{drawer_classes}">'
-                bot_reply += f'    <div class="flex items-center justify-between mb-4"> <h4 class="text-xl font-semibold text-white mr-2 flex-grow">Nutrition (per serving)</h4> <button class="speak-drawer-button text-gray-300 hover:text-white text-xl mr-3" title="Read content aloud" data-content-target="{content_id_nutrition}"><i class="fas fa-volume-up"></i></button> <button data-close-drawer="{drawer_id_nutrition}" class="text-gray-300 hover:text-white text-3xl leading-none">&times;</button> </div>'
-                bot_reply += f'    <div id="{content_id_nutrition}" class="drawer-readable-content space-y-0.5 text-sm">'
-                bot_reply += f'        <p>• Fat: {recipe.get("FatContent", "N/A")}g</p>'
-                bot_reply += f'        <p>• Saturated Fat: {recipe.get("SaturatedFatContent", "N/A")}g</p>'
-                bot_reply += f'        <p>• Cholesterol: {recipe.get("CholesterolContent", "N/A")}mg</p>'
-                bot_reply += f'        <p>• Sodium: {recipe.get("SodiumContent", "N/A")}mg</p>'
-                bot_reply += f'        <p>• Carbs: {recipe.get("CarbohydrateContent", "N/A")}g</p>'
-                bot_reply += f'        <p>• Fiber: {recipe.get("FiberContent", "N/A")}g</p>'
-                bot_reply += f'        <p>• Sugar: {recipe.get("SugarContent", "N/A")}g</p>'
-                bot_reply += f'        <p>• Protein: {recipe.get("ProteinContent", "N/A")}g</p>'
-                bot_reply += f'    </div>' # Close content_id_nutrition
-                bot_reply += f'</div>' # Close drawer_id_nutrition
-                bot_reply += '</div>' # --- Card End ---
-
+                        parsed = json.loads(ingredients_data)
+                        if isinstance(parsed, list):
+                            # Try to parse quantities too
+                            if isinstance(quantities_data, str) and quantities_data.strip().startswith('['):
+                                try:
+                                    parsed_quantities = json.loads(quantities_data)
+                                    if isinstance(parsed_quantities, list):
+                                        for i, ing in enumerate(parsed):
+                                            if ing and str(ing).strip():
+                                                if i < len(parsed_quantities) and parsed_quantities[i]:
+                                                    ingredients.append(f"{parsed_quantities[i]} {ing}")
+                                                else:
+                                                    ingredients.append(str(ing))
+                                    else:
+                                        ingredients = [str(ing) for ing in parsed if ing and str(ing).strip()]
+                                except:
+                                    ingredients = [str(ing) for ing in parsed if ing and str(ing).strip()]
+                            else:
+                                ingredients = [str(ing) for ing in parsed if ing and str(ing).strip()]
+                    except:
+                        if ingredients_data.strip():
+                            ingredients = [ingredients_data]
+                elif ingredients_data.strip():
+                    ingredients = [ingredients_data]
+            
+            # Process instructions
+            instructions = []
+            instructions_data = recipe.get('RecipeInstructions', [])
+            if isinstance(instructions_data, list):
+                instructions = [str(inst) for inst in instructions_data if inst]
+            elif isinstance(instructions_data, str):
+                try:
+                    parsed = json.loads(instructions_data)
+                    if isinstance(parsed, list):
+                        instructions = [str(inst) for inst in parsed if inst]
+                    else:
+                        instructions = [instructions_data]
+                except:
+                    if instructions_data.strip():
+                        instructions = [instructions_data]
+            
+            # Process calories
+            calories = recipe.get('Calories')
+            calories_display = "N/A"
+            if calories is not None:
+                try: 
+                    calories_display = f"{float(calories):.0f}"
+                except: 
+                    calories_display = str(calories)
+            
+            # Build recipe data object
+            recipe_data = {
+                'id': str(recipe.get('RecipeId', '')),
+                'name': recipe.get('Name', 'Unknown Recipe'),
+                'image': image_url,
+                'calories': calories_display,
+                'rating': recipe.get('AggregatedRating'),
+                'reviews': recipe.get('ReviewCount'),
+                'url': f"https://www.food.com/recipe/{slugify(recipe.get('Name', ''))}-{recipe.get('RecipeId', '')}",
+                'ingredients': ingredients,
+                'instructions': instructions,
+                'nutrition': {
+                    'Fat': f"{recipe.get('FatContent', 'N/A')}g",
+                    'Saturated Fat': f"{recipe.get('SaturatedFatContent', 'N/A')}g",
+                    'Cholesterol': f"{recipe.get('CholesterolContent', 'N/A')}mg",
+                    'Sodium': f"{recipe.get('SodiumContent', 'N/A')}mg",
+                    'Carbohydrates': f"{recipe.get('CarbohydrateContent', 'N/A')}g",
+                    'Fiber': f"{recipe.get('FiberContent', 'N/A')}g",
+                    'Sugar': f"{recipe.get('SugarContent', 'N/A')}g",
+                    'Protein': f"{recipe.get('ProteinContent', 'N/A')}g"
+                },
+                'additionalInfo': {
+                    'Author': recipe.get('AuthorName', 'N/A'),
+                    'Published': recipe.get('DatePublished', 'N/A'),
+                    'Servings': recipe.get('RecipeServings', recipe.get('RecipeYield', 'N/A')),
+                    'Prep Time': f"{recipe.get('PrepTime', 'N/A')} minutes" if recipe.get('PrepTime') else 'N/A',
+                    'Category': recipe.get('RecipeCategory', 'N/A')
+                }
+            }
+            
+            recipes_data.append(recipe_data)
+        
         return jsonify({
-            'reply': bot_reply, 
-            'currentPage': page, 
-            'totalPages': total_pages, 
-            'totalResults': total_processed_results
+            'recipes': recipes_data,
+            'currentPage': page,
+            'totalPages': total_pages,
+            'totalResults': total_results,
+            'success': True
         })
 
     except pymongo.errors.OperationFailure as e:
         print(f"MongoDB OperationFailure: {e.details}")
         error_message = str(e.details.get('errmsg', 'Unknown MongoDB error'))
-        bot_reply = f"Sorry, I had trouble searching for recipes due to a database error: {error_message}"
-        if "index not found" in error_message.lower() or "no such index" in error_message.lower():
-             bot_reply = f"Sorry, I encountered an issue with the recipe search index ({RECIPE_VECTOR_INDEX_NAME}). Please ensure it\'s set up correctly in MongoDB Atlas."
-        elif "vector search" in error_message.lower() and "wrong number of dimensions" in error_message.lower():
-             bot_reply = f"Sorry, the search index ({RECIPE_VECTOR_INDEX_NAME}) seems to have a dimension mismatch. Expected 384 dimensions."
-        print(f"DEBUG: bot_reply before jsonify (on error): {bot_reply}")
-        return jsonify({'reply': bot_reply}), 500
+        
+        # If vector search times out, try a simpler text search fallback
+        if "time limit" in error_message.lower():
+            print("Vector search timed out, falling back to text search...")
+            try:
+                # Use text search as fallback
+                text_search_results = list(recipes_collection.find(
+                    {"$text": {"$search": user_message}},
+                    {
+                        "_id": 0,
+                        "RecipeId": 1,
+                        "Name": 1,
+                        "RecipeIngredientParts": 1,
+                        "RecipeIngredientQuantities": 1,
+                        "RecipeInstructions": 1,
+                        "Images": 1,
+                        "MainImage": 1,
+                        "Calories": 1,
+                        "AuthorName": 1,
+                        "DatePublished": 1,
+                        "RecipeServings": 1,
+                        "RecipeYield": 1,
+                        "PrepTime": 1,
+                        "RecipeCategory": 1,
+                        "FatContent": 1,
+                        "SaturatedFatContent": 1,
+                        "CholesterolContent": 1,
+                        "SodiumContent": 1,
+                        "CarbohydrateContent": 1,
+                        "FiberContent": 1,
+                        "SugarContent": 1,
+                        "ProteinContent": 1,
+                        "AggregatedRating": 1,
+                        "ReviewCount": 1,
+                        "score": {"$meta": "textScore"}
+                    }
+                ).sort([("score", {"$meta": "textScore"})]).limit(30))
+                
+                if text_search_results:
+                    # Sort text search results by image availability
+                    recipes_with_images = []
+                    recipes_without_images = []
+                    
+                    for recipe in text_search_results:
+                        # Check if recipe has a valid image
+                        has_image = False
+                        main_image = recipe.get('MainImage')
+                        images = recipe.get('Images', [])
+                        
+                        if main_image and isinstance(main_image, str) and main_image.strip().startswith(("http://", "https://")):
+                            has_image = True
+                        elif images and isinstance(images, list) and len(images) > 0:
+                            if isinstance(images[0], str) and images[0].strip().startswith(("http://", "https://")):
+                                has_image = True
+                        
+                        if has_image:
+                            recipes_with_images.append(recipe)
+                        else:
+                            recipes_without_images.append(recipe)
+                    
+                    # Combine results with images first
+                    sorted_text_results = recipes_with_images + recipes_without_images
+                    
+                    # Process text search results the same way
+                    total_results = len(sorted_text_results)
+                    total_pages = max(1, min(3, math.ceil(total_results / per_page)))
+                    start_idx = (page - 1) * per_page
+                    end_idx = start_idx + per_page
+                    page_results = sorted_text_results[start_idx:end_idx]
+                    
+                    # Process results into JSON format (same as vector search)
+                    recipes_data = []
+                    for recipe in page_results:
+                        # Extract image URL
+                        image_url = None
+                        main_image = recipe.get('MainImage')
+                        images = recipe.get('Images', [])
+                        
+                        if main_image and isinstance(main_image, str) and main_image.strip().startswith(("http://", "https://")):
+                            image_url = main_image.strip()
+                        elif images and isinstance(images, list) and len(images) > 0:
+                            if isinstance(images[0], str) and images[0].strip().startswith(("http://", "https://")):
+                                image_url = images[0].strip()
+                        
+                        # Process ingredients
+                        ingredients = []
+                        ingredients_data = recipe.get('RecipeIngredientParts')
+                        quantities_data = recipe.get('RecipeIngredientQuantities')
+                        
+                        if isinstance(ingredients_data, list):
+                            # If we have quantities, combine them with ingredients
+                            if isinstance(quantities_data, list):
+                                for i, ing in enumerate(ingredients_data):
+                                    if ing and str(ing).strip():
+                                        if i < len(quantities_data) and quantities_data[i]:
+                                            quantity = str(quantities_data[i]).strip()
+                                            # Skip NA, N/A, None, or similar non-quantity values
+                                            if quantity.upper() in ['NA', 'N/A', 'NONE', 'NULL', '']:
+                                                ingredients.append(str(ing))
+                                            else:
+                                                # Combine quantity with ingredient
+                                                ingredients.append(f"{quantity} {ing}")
+                                        else:
+                                            # No quantity for this ingredient
+                                            ingredients.append(str(ing))
+                            else:
+                                # No quantities available, just use ingredients as is
+                                ingredients = [str(ing) for ing in ingredients_data if ing and str(ing).strip()]
+                        elif isinstance(ingredients_data, str):
+                            if ingredients_data.strip().startswith('['):
+                                try:
+                                    parsed = json.loads(ingredients_data)
+                                    if isinstance(parsed, list):
+                                        # Try to parse quantities too
+                                        if isinstance(quantities_data, str) and quantities_data.strip().startswith('['):
+                                            try:
+                                                parsed_quantities = json.loads(quantities_data)
+                                                if isinstance(parsed_quantities, list):
+                                                    for i, ing in enumerate(parsed):
+                                                        if ing and str(ing).strip():
+                                                            if i < len(parsed_quantities) and parsed_quantities[i]:
+                                                                quantity = str(parsed_quantities[i]).strip()
+                                                                # Skip NA, N/A, None, or similar non-quantity values
+                                                                if quantity.upper() in ['NA', 'N/A', 'NONE', 'NULL', '']:
+                                                                    ingredients.append(str(ing))
+                                                                else:
+                                                                    # Combine quantity with ingredient
+                                                                    ingredients.append(f"{quantity} {ing}")
+                                                            else:
+                                                                ingredients.append(str(ing))
+                                                else:
+                                                    ingredients = [str(ing) for ing in parsed if ing and str(ing).strip()]
+                                            except:
+                                                ingredients = [str(ing) for ing in parsed if ing and str(ing).strip()]
+                                        else:
+                                            ingredients = [str(ing) for ing in parsed if ing and str(ing).strip()]
+                                except:
+                                    if ingredients_data.strip():
+                                        ingredients = [ingredients_data]
+                            elif ingredients_data.strip():
+                                ingredients = [ingredients_data]
+                        
+                        # Process instructions
+                        instructions = []
+                        instructions_data = recipe.get('RecipeInstructions', [])
+                        if isinstance(instructions_data, list):
+                            instructions = [str(inst) for inst in instructions_data if inst]
+                        elif isinstance(instructions_data, str):
+                            try:
+                                parsed = json.loads(instructions_data)
+                                if isinstance(parsed, list):
+                                    instructions = [str(inst) for inst in parsed if inst]
+                                else:
+                                    instructions = [instructions_data]
+                            except:
+                                if instructions_data.strip():
+                                    instructions = [instructions_data]
+                        
+                        # Process calories
+                        calories = recipe.get('Calories')
+                        calories_display = "N/A"
+                        if calories is not None:
+                            try: 
+                                calories_display = f"{float(calories):.0f}"
+                            except: 
+                                calories_display = str(calories)
+                        
+                        # Build recipe data object
+                        recipe_data = {
+                            'id': str(recipe.get('RecipeId', '')),
+                            'name': recipe.get('Name', 'Unknown Recipe'),
+                            'image': image_url,
+                            'calories': calories_display,
+                            'rating': recipe.get('AggregatedRating'),
+                            'reviews': recipe.get('ReviewCount'),
+                            'url': f"https://www.food.com/recipe/{slugify(recipe.get('Name', ''))}-{recipe.get('RecipeId', '')}",
+                            'ingredients': ingredients,
+                            'instructions': instructions,
+                            'nutrition': {
+                                'Fat': f"{recipe.get('FatContent', 'N/A')}g",
+                                'Saturated Fat': f"{recipe.get('SaturatedFatContent', 'N/A')}g",
+                                'Cholesterol': f"{recipe.get('CholesterolContent', 'N/A')}mg",
+                                'Sodium': f"{recipe.get('SodiumContent', 'N/A')}mg",
+                                'Carbohydrates': f"{recipe.get('CarbohydrateContent', 'N/A')}g",
+                                'Fiber': f"{recipe.get('FiberContent', 'N/A')}g",
+                                'Sugar': f"{recipe.get('SugarContent', 'N/A')}g",
+                                'Protein': f"{recipe.get('ProteinContent', 'N/A')}g"
+                            },
+                            'additionalInfo': {
+                                'Author': recipe.get('AuthorName', 'N/A'),
+                                'Published': recipe.get('DatePublished', 'N/A'),
+                                'Servings': recipe.get('RecipeServings', recipe.get('RecipeYield', 'N/A')),
+                                'Prep Time': f"{recipe.get('PrepTime', 'N/A')} minutes" if recipe.get('PrepTime') else 'N/A',
+                                'Category': recipe.get('RecipeCategory', 'N/A')
+                            }
+                        }
+                        
+                        recipes_data.append(recipe_data)
+                    
+                    return jsonify({
+                        'recipes': recipes_data,
+                        'currentPage': page,
+                        'totalPages': total_pages,
+                        'totalResults': total_results,
+                        'success': True,
+                        'searchType': 'text'  # Indicate fallback was used
+                    })
+                else:
+                    return jsonify({'recipes': [], 'success': True, 'currentPage': 1, 'totalPages': 0, 'totalResults': 0})
+            except Exception as fallback_error:
+                print(f"Text search fallback also failed: {fallback_error}")
+                return jsonify({'error': 'Search failed', 'success': False}), 500
+        else:
+            return jsonify({'error': error_message, 'success': False}), 500
     except Exception as e:
-        print(f"Error during vector search or processing results: {e}")
-        bot_reply = "Sorry, I encountered an unexpected error while searching for recipes."
-        print(f"DEBUG: bot_reply before jsonify (on general exception): {bot_reply}")
-        return jsonify({'reply': bot_reply}), 500
+        print(f"Error during vector search: {e}")
+        return jsonify({'error': 'Search failed', 'success': False}), 500
 
 @app.route('/suggest', methods=['GET'])
 def suggest():
@@ -389,30 +630,71 @@ def suggest():
     print(f"[Suggest Route] Using collection: {recipes_collection_name}")
 
     try:
-        regex_query = f"^{re.escape(query)}"
-        print(f"[Suggest Route] Constructed regex: '{regex_query}'")
+        # Use text search if available, otherwise fall back to regex
+        # First, try text search which is much faster
+        try:
+            suggestions_cursor = recipes_collection.find(
+                {"$text": {"$search": query}},
+                {"Name": 1, "_id": 0, "score": {"$meta": "textScore"}}
+            ).sort([("score", {"$meta": "textScore"})]).limit(10)
+            
+            suggestions_list_from_db = list(suggestions_cursor)
+            
+            # If text search returns results, use them
+            if suggestions_list_from_db:
+                print(f"[Suggest Route] Text search found {len(suggestions_list_from_db)} results")
+                suggestion_names = [s['Name'] for s in suggestions_list_from_db if 'Name' in s and s['Name']]
+                return jsonify(suggestion_names[:7])
+        except Exception as text_search_error:
+            print(f"[Suggest Route] Text search failed, falling back to regex: {text_search_error}")
         
-        print("[Suggest Route] Attempting to query database...")
+        # Fallback to regex if text search fails or returns no results
+        # Use a more efficient regex pattern
+        regex_query = {"$regex": f".*{re.escape(query)}.*", "$options": "i"}
+        print(f"[Suggest Route] Using regex fallback: {regex_query}")
+        
         suggestions_cursor = recipes_collection.find(
-            {"Name": {"$regex": regex_query, "$options": "i"}},
-            {"Name": 1, "_id": 0} # Project only the name
-        ).limit(7) # Limit to 7 suggestions
+            {"Name": regex_query},
+            {"Name": 1, "_id": 0}
+        ).limit(10)
         
-        # Convert cursor to list to see results immediately for logging
         suggestions_list_from_db = list(suggestions_cursor)
-        print(f"[Suggest Route] Suggestions from DB (raw list): {suggestions_list_from_db}")
+        print(f"[Suggest Route] Regex search found {len(suggestions_list_from_db)} results")
 
-        suggestion_names = list(set([s['Name'] for s in suggestions_list_from_db if 'Name' in s]))
-        print(f"[Suggest Route] Processed suggestion names (unique, limited): {suggestion_names[:7]}")
+        # Get unique names and limit to 7
+        suggestion_names = []
+        seen = set()
+        for s in suggestions_list_from_db:
+            if 'Name' in s and s['Name'] and s['Name'] not in seen:
+                suggestion_names.append(s['Name'])
+                seen.add(s['Name'])
+                if len(suggestion_names) >= 7:
+                    break
         
-        response_data = suggestion_names[:7]
-        print(f"[Suggest Route] Returning JSON response: {response_data}")
-        return jsonify(response_data)
+        print(f"[Suggest Route] Returning {len(suggestion_names)} suggestions")
+        return jsonify(suggestion_names)
 
     except Exception as e:
         print(f"[Suggest Route] Error in /suggest endpoint: {e}")
-        # Consider the type of error, if it's a DB error, you might want to return a specific HTTP status
         return jsonify([]), 500 # Return empty list and 500 on error
+
+# TODO: Future Unique Endpoints
+# @app.route('/cooking-mode/<recipe_id>', methods=['POST'])
+# - Start a cooking session with step tracking
+# - Voice command processing
+# - Timer management
+#
+# @app.route('/substitute/<ingredient>', methods=['GET'])
+# - AI-powered ingredient substitution suggestions
+#
+# @app.route('/meal-plan', methods=['POST'])
+# - Generate weekly meal plans based on preferences
+#
+# @app.route('/recipe-science/<recipe_id>', methods=['GET'])
+# - Explain the science behind cooking techniques
+#
+# @app.route('/community/cook-along', methods=['GET', 'POST'])
+# - Real-time cooking sessions with other users
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001, debug=True) 
