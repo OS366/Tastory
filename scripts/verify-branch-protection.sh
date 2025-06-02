@@ -55,6 +55,11 @@ check_protection() {
             echo -e "  ❌ Deletion protection: ${RED}Disabled${NC}"
         fi
         
+        # Special note for development branch
+        if [ "$branch" == "development" ] && [ "$expected_reviewers" == "0" ]; then
+            echo -e "  ℹ️  Solo developer mode: ${YELLOW}Self-merge allowed${NC}"
+        fi
+        
     else
         echo -e "  ❌ ${RED}No protection rules found!${NC}"
     fi
@@ -70,7 +75,7 @@ else
 fi
 
 # Check each branch
-check_protection "development" "1"
+check_protection "development" "0"
 check_protection "stable" "2"
 check_protection "main" "2"
 

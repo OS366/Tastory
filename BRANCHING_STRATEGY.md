@@ -129,6 +129,29 @@ Follow conventional commits:
 - Restrict who can push (release managers only)
 - Require signed commits
 
+## Solo Developer Configuration
+
+For solo developers or during the initial development phase, the `development` branch protection can be adjusted to:
+
+- **Required reviewers**: 0 (allows self-merge)
+- **Still requires**: Pull requests (no direct pushes)
+- **Maintains**: All other protection features
+
+This configuration ensures code goes through PRs for documentation and history while allowing solo developers to merge their own work. As the team grows, increase the required reviewers accordingly.
+
+### Adjusting for Team Growth
+
+```bash
+# Solo developer (current)
+required_approving_review_count: 0
+
+# Small team (2-5 developers)
+required_approving_review_count: 1
+
+# Larger team (5+ developers)
+required_approving_review_count: 2
+```
+
 ## Quick Reference
 
 ```
