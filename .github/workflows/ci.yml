@@ -1,11 +1,8 @@
 name: CI
 
 on:
-  push:
-    branches: [development, stable, main]
-  pull_request:
-    branches: [development, stable, main]
-  workflow_dispatch: # Allow manual triggering
+  push: # Trigger on every push to any branch
+  workflow_dispatch: # Keep manual triggering option
 
 jobs:
   # Python Backend Tests
