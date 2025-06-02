@@ -239,7 +239,10 @@ def chat():
             if main_image and isinstance(main_image, str) and main_image.strip().startswith(("http://", "https://")):
                 has_image = True
             elif images and isinstance(images, list) and len(images) > 0:
-                if isinstance(images[0], str) and images[0].strip().startswith(("http://", "https://")):
+                if (
+                    isinstance(images[0], str)
+                    and images[0].strip().startswith(("http://", "https://"))
+                ):
                     has_image = True
 
             if has_image:
@@ -358,7 +361,10 @@ def chat():
                 "calories": calories_display,
                 "rating": recipe.get("AggregatedRating"),
                 "reviews": recipe.get("ReviewCount"),
-                "url": f"https://www.food.com/recipe/{slugify(recipe.get('Name', ''))}-{recipe.get('RecipeId', '')}",
+                "url": (
+                    f"https://www.food.com/recipe/"
+                    f"{slugify(recipe.get('Name', ''))}-{recipe.get('RecipeId', '')}"
+                ),
                 "ingredients": ingredients,
                 "instructions": instructions,
                 "nutrition": {
@@ -590,7 +596,10 @@ def chat():
                             "calories": calories_display,
                             "rating": recipe.get("AggregatedRating"),
                             "reviews": recipe.get("ReviewCount"),
-                            "url": f"https://www.food.com/recipe/{slugify(recipe.get('Name', ''))}-{recipe.get('RecipeId', '')}",
+                            "url": (
+                                f"https://www.food.com/recipe/"
+                                f"{slugify(recipe.get('Name', ''))}-{recipe.get('RecipeId', '')}"
+                            ),
                             "ingredients": ingredients,
                             "instructions": instructions,
                             "nutrition": {
