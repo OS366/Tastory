@@ -3,8 +3,7 @@ name: Verify Commits
 on:
   pull_request:
     types: [opened, synchronize]
-  push:
-    branches: [main, development, stable]
+  push: # Run on all pushes to any branch
 
 jobs:
   verify-commits:
