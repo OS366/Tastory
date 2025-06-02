@@ -315,11 +315,11 @@ def chat():
                                                     ingredients.append(str(ing))
                                     else:
                                         ingredients = [str(ing) for ing in parsed if ing and str(ing).strip()]
-                                except:
+                                except Exception:
                                     ingredients = [str(ing) for ing in parsed if ing and str(ing).strip()]
                             else:
                                 ingredients = [str(ing) for ing in parsed if ing and str(ing).strip()]
-                    except:
+                    except Exception:
                         if ingredients_data.strip():
                             ingredients = [ingredients_data]
                 elif ingredients_data.strip():
@@ -337,7 +337,7 @@ def chat():
                         instructions = [str(inst) for inst in parsed if inst]
                     else:
                         instructions = [instructions_data]
-                except:
+                except Exception:
                     if instructions_data.strip():
                         instructions = [instructions_data]
 
@@ -347,7 +347,7 @@ def chat():
             if calories is not None:
                 try:
                     calories_display = f"{float(calories):.0f}"
-                except:
+                except Exception:
                     calories_display = str(calories)
 
             # Build recipe data object
@@ -549,11 +549,11 @@ def chat():
                                                     ingredients = [
                                                         str(ing) for ing in parsed if ing and str(ing).strip()
                                                     ]
-                                            except:
+                                            except Exception:
                                                 ingredients = [str(ing) for ing in parsed if ing and str(ing).strip()]
                                         else:
                                             ingredients = [str(ing) for ing in parsed if ing and str(ing).strip()]
-                                except:
+                                except Exception:
                                     if ingredients_data.strip():
                                         ingredients = [ingredients_data]
                             elif ingredients_data.strip():
@@ -571,7 +571,7 @@ def chat():
                                     instructions = [str(inst) for inst in parsed if inst]
                                 else:
                                     instructions = [instructions_data]
-                            except:
+                            except Exception:
                                 if instructions_data.strip():
                                     instructions = [instructions_data]
 
@@ -581,7 +581,7 @@ def chat():
                         if calories is not None:
                             try:
                                 calories_display = f"{float(calories):.0f}"
-                            except:
+                            except Exception:
                                 calories_display = str(calories)
 
                         # Build recipe data object
