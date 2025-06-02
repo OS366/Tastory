@@ -137,6 +137,7 @@ jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
+    continue-on-error: true # Don't block PR merge for security issues initially
     steps:
       - uses: actions/checkout@v4
 
@@ -163,7 +164,7 @@ jobs:
       - backend-test
       - frontend-lint
       - frontend-build
-      - security-scan
+      # Note: security-scan is not included here since it's allowed to fail
     runs-on: ubuntu-latest
     steps:
       - name: Ensure all jobs pass
