@@ -124,7 +124,19 @@ def generate_star_rating(rating):
     return stars_html
 
 
-# --- Routes ---
+# Routes
+@app.route("/health")
+def health_check():
+    """Health check endpoint for Cloud Run"""
+    try:
+        # Test MongoDB connection
+        db.recipes.find_one({}, {"_id": 1})
+        return {"status": "healthy", "service": "tastory-api", "database": "connected"}, 200
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return {"status": "unhealthy", "error": str(e)}, 503
+
+
 @app.route("/")
 def index():
     return jsonify(
@@ -135,6 +147,7 @@ def index():
             "endpoints": {
                 "/chat": "Search for recipes using natural language",
                 "/suggest": "Get search suggestions as you type",
+                "/health": "Health check endpoint"
             },
             "stats": {"total_recipes": "230,000+", "response_time": "<2s", "languages_supported": 6},
         }
