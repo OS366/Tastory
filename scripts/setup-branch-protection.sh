@@ -15,19 +15,35 @@ setup_branch_protection() {
     
     echo -e "\n${YELLOW}Setting up protection rules for ${branch} branch...${NC}"
     
-    # Create branch protection rule
-    gh api \
+    # Create JSON payload for the API
+    json_payload=$(cat << EOF
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": ["test", "lint"]
+  },
+  "enforce_admins": true,
+  "required_pull_request_reviews": {
+    "dismissal_restrictions": {},
+    "dismiss_stale_reviews": true,
+    "require_code_owner_reviews": true,
+    "required_approving_review_count": $required_reviews
+  },
+  "restrictions": null,
+  "required_linear_history": true,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "required_conversation_resolution": true,
+  "lock_branch": false
+}
+EOF
+)
+    
+    # Create branch protection rule using the JSON payload
+    echo "$json_payload" | gh api \
       --method PUT \
-      /repos/OS366/Tastory/branches/$branch/protection \
-      -f required_status_checks='{"strict":true,"contexts":["test","lint"]}' \
-      -f enforce_admins=true \
-      -f required_pull_request_reviews="{\"required_approving_review_count\":$required_reviews,\"dismiss_stale_reviews\":true,\"require_code_owner_reviews\":true}" \
-      -f restrictions=null \
-      -f required_linear_history=true \
-      -f allow_force_pushes=false \
-      -f allow_deletions=false \
-      -f required_conversation_resolution=true \
-      -f lock_branch=false
+      "/repos/OS366/Tastory/branches/$branch/protection" \
+      --input -
       
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}Successfully set up protection rules for ${branch} branch${NC}"
