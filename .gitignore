@@ -245,3 +245,32 @@ lerna-debug.log*
 # *.parquet
 # *_cleaned.csv
 # *_cleaned.parquet
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Logs
+*.log
+firebase-debug.log
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*~
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Large data files
+data/
