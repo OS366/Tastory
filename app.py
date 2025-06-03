@@ -1,5 +1,6 @@
 import datetime
 import json
+import logging
 import math  # Required for math.ceil
 import os
 import re
@@ -133,7 +134,7 @@ def health_check():
         db.recipes.find_one({}, {"_id": 1})
         return {"status": "healthy", "service": "tastory-api", "database": "connected"}, 200
     except Exception as e:
-        logger.error(f"Health check failed: {str(e)}")
+        print(f"Health check failed: {str(e)}")
         return {"status": "unhealthy", "error": str(e)}, 503
 
 
