@@ -4,6 +4,8 @@ import logging
 import math  # Required for math.ceil
 import os
 import re
+import uuid
+from datetime import datetime, timedelta
 
 import numpy as np
 import pymongo
@@ -125,19 +127,119 @@ def generate_star_rating(rating):
     return stars_html
 
 
-# Routes
-@app.route("/health")
-def health_check():
-    """Health check endpoint for Cloud Run"""
+# --- Helper function to log search queries ---
+def log_search_query(query, session_id, results_count=None):
+    """Log search queries for trending calculation"""
+    if db is None:
+        return
+    
     try:
-        # Test MongoDB connection
-        db.recipes.find_one({}, {"_id": 1})
-        return {"status": "healthy", "service": "tastory-api", "database": "connected"}, 200
+        search_logs = db.search_logs
+        log_entry = {
+            "query": query.lower().strip(),
+            "timestamp": datetime.utcnow(),
+            "session_id": session_id,
+            "results_count": results_count
+        }
+        search_logs.insert_one(log_entry)
     except Exception as e:
-        print(f"Health check failed: {str(e)}")
-        return {"status": "unhealthy", "error": str(e)}, 503
+        print(f"Error logging search query: {e}")
 
 
+# --- Helper function to calculate trending searches ---
+def calculate_trending_searches():
+    """Calculate trending searches based on recent activity"""
+    if db is None:
+        return []
+    
+    try:
+        search_logs = db.search_logs
+        
+        # Time windows
+        now = datetime.utcnow()
+        one_hour_ago = now - timedelta(hours=1)
+        six_hours_ago = now - timedelta(hours=6)
+        twenty_four_hours_ago = now - timedelta(hours=24)
+        
+        # Aggregation pipeline
+        pipeline = [
+            {
+                "$match": {
+                    "timestamp": {"$gte": twenty_four_hours_ago}
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$query",
+                    "total_count": {"$sum": 1},
+                    "recent_count": {
+                        "$sum": {
+                            "$cond": [{"$gte": ["$timestamp", one_hour_ago]}, 1, 0]
+                        }
+                    },
+                    "medium_count": {
+                        "$sum": {
+                            "$cond": [{"$gte": ["$timestamp", six_hours_ago]}, 1, 0]
+                        }
+                    }
+                }
+            },
+            {
+                "$match": {
+                    "total_count": {"$gte": 5}  # Minimum 5 searches to qualify
+                }
+            },
+            {
+                "$addFields": {
+                    "score": {
+                        "$divide": [
+                            {
+                                "$add": [
+                                    {"$multiply": ["$recent_count", 3]},
+                                    {"$multiply": ["$medium_count", 2]},
+                                    "$total_count"
+                                ]
+                            },
+                            2  # time decay factor
+                        ]
+                    }
+                }
+            },
+            {
+                "$sort": {"score": -1}
+            },
+            {
+                "$limit": 10
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "query": "$_id",
+                    "count": "$total_count",
+                    "score": 1
+                }
+            }
+        ]
+        
+        trending = list(search_logs.aggregate(pipeline))
+        
+        # Calculate trend direction
+        for item in trending:
+            # This is simplified - in production, you'd compare with previous period
+            if item.get("score", 0) > 10:
+                item["trend"] = "up"
+            else:
+                item["trend"] = "stable"
+            item["percentChange"] = 0  # Placeholder
+        
+        return trending
+        
+    except Exception as e:
+        print(f"Error calculating trending searches: {e}")
+        return []
+
+
+# --- Routes ---
 @app.route("/")
 def index():
     return jsonify(
@@ -148,6 +250,7 @@ def index():
             "endpoints": {
                 "/chat": "Search for recipes using natural language",
                 "/suggest": "Get search suggestions as you type",
+                "/trending": "Get trending recipe searches",
                 "/health": "Health check endpoint"
             },
             "stats": {"total_recipes": "230,000+", "response_time": "<2s", "languages_supported": 6},
@@ -168,6 +271,14 @@ def chat():
 
     if not user_message:
         return jsonify({"error": "No message provided"}), 400
+
+    # Log the search query
+    try:
+        session_id = request.headers.get('X-Session-ID', str(uuid.uuid4()))
+        log_search_query(user_message, session_id, results_count=None)
+    except Exception as e:
+        print(f"Failed to log search query: {e}")
+        # Continue with search even if logging fails
 
     global client, db
     if db is None:
@@ -272,6 +383,19 @@ def chat():
         start_idx = (page - 1) * per_page
         end_idx = start_idx + per_page
         page_results = sorted_results[start_idx:end_idx]
+
+        # Update search log with results count
+        try:
+            session_id = request.headers.get('X-Session-ID', str(uuid.uuid4()))
+            # Update the log entry with results count
+            if db is not None:
+                db.search_logs.update_one(
+                    {"session_id": session_id, "query": user_message.lower().strip()},
+                    {"$set": {"results_count": total_results}},
+                    upsert=False
+                )
+        except Exception as e:
+            print(f"Failed to update search log with results count: {e}")
 
         # Convert to simple JSON format instead of HTML
         recipes_data = []
@@ -726,6 +850,50 @@ def suggest():
     except Exception as e:
         print(f"[Suggest Route] Error in /suggest endpoint: {e}")
         return jsonify([]), 500  # Return empty list and 500 on error
+
+
+@app.route("/trending", methods=["GET"])
+def trending():
+    """Get trending searches"""
+    try:
+        # Check cache first
+        if db is not None:
+            trending_cache = db.trending_cache
+            cache_doc = trending_cache.find_one({"_id": "current"})
+            
+            # Use cache if it's less than 15 minutes old
+            if cache_doc:
+                cache_age = datetime.utcnow() - cache_doc.get("updated_at", datetime.min)
+                if cache_age < timedelta(minutes=15):
+                    return jsonify({
+                        "trending": cache_doc.get("trending", []),
+                        "lastUpdated": cache_doc.get("updated_at").isoformat() + "Z"
+                    })
+        
+        # Calculate fresh trending data
+        trending_data = calculate_trending_searches()
+        
+        # Update cache
+        if db is not None:
+            trending_cache = db.trending_cache
+            trending_cache.replace_one(
+                {"_id": "current"},
+                {
+                    "_id": "current",
+                    "trending": trending_data,
+                    "updated_at": datetime.utcnow()
+                },
+                upsert=True
+            )
+        
+        return jsonify({
+            "trending": trending_data,
+            "lastUpdated": datetime.utcnow().isoformat() + "Z"
+        })
+        
+    except Exception as e:
+        print(f"Error in /trending endpoint: {e}")
+        return jsonify({"error": "Failed to fetch trending searches"}), 500
 
 
 # TODO: Future Unique Endpoints
