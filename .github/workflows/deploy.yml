@@ -44,7 +44,7 @@ jobs:
             --region $REGION \
             --platform managed \
             --allow-unauthenticated \
-            --set-env-vars MONGODB_URI="${{ secrets.MONGODB_URI }}" \
+            --update-env-vars MONGODB_URI="${{ secrets.MONGODB_URI }}" \
             --memory 2Gi \
             --min-instances 1 \
             --max-instances 100
@@ -53,6 +53,8 @@ jobs:
         run: |
           SERVICE_URL=$(gcloud run services describe $SERVICE_NAME --region $REGION --format 'value(status.url)')
           echo "Service deployed at: $SERVICE_URL"
+          # Wait a bit for service to be ready
+          sleep 10
           curl -f "$SERVICE_URL/health" || exit 1
 
   deploy-frontend:
