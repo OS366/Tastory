@@ -20,14 +20,7 @@
 
 ## 🚀 What is Tastory?
 
-Tastory is a specialized **food search engine** that understands what you're looking for, not just keyword matching. Built specifically for food and recipes, it delivers instant, relevant results whether you search for:
-
-- **Ingredients**: "chicken and broccoli"
-- **Dietary needs**: "gluten-free desserts"
-- **Time constraints**: "30 minute meals"
-- **Cuisine types**: "authentic Thai curry"
-- **Cooking methods**: "air fryer recipes"
-- **Occasions**: "romantic dinner for two"
+Tastory is a powerful recipe search engine that helps you find the perfect recipe from a vast collection of over 230,000 recipes. Built with modern technology and optimized for speed, Tastory delivers relevant results in under 2 seconds.
 
 ## ✨ Features
 
@@ -84,8 +77,8 @@ Tastory is a specialized **food search engine** that understands what you're loo
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/yourusername/tastory.git
-   cd tastory
+   git clone https://github.com/OS366/Tastory.git
+   cd Tastory
    ```
 
 2. **Set up the backend**
@@ -150,7 +143,45 @@ Try these searches to see Tastory in action:
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+Tastory is available under dual licensing:
+
+### Open Source License (AGPL-3.0)
+
+The open-source version is licensed under the GNU Affero General Public License v3.0. This means you can:
+
+- Use the software for non-commercial purposes
+- Modify the code
+- Distribute the code
+- Must keep the source code open source if you distribute it
+
+### Commercial License
+
+For commercial use, we offer flexible licensing options:
+
+- Basic Commercial License
+- Professional License
+- Enterprise License
+
+Contact us at licensing@davidlabs.ca for:
+
+- Commercial licensing
+- Custom feature development
+- Enterprise support
+- White-label solutions
+
+## Contributing
+
+We welcome contributions! Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting pull requests.
+
+## Support
+
+- Community Support: Open an issue on GitHub
+- Commercial Support: Contact support@davidlabs.ca
+- Enterprise Support: Contact enterprise@davidlabs.ca
+
+## About
+
+Tastory is developed by [David Labs](https://www.davidlabs.ca), a company dedicated to making cooking and recipe discovery easier for everyone.
 
 ---
 

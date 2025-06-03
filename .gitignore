@@ -274,3 +274,16 @@ firebase-debug.log
 
 # Large data files
 data/
+
+# Commercial documentation
+docs/COMMERCIAL_FEATURES.md
+docs/ENTERPRISE_FEATURES.md
+docs/PRICING.md
+
+# Private keys and certificates
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+*.priv
