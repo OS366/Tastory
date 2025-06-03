@@ -54,6 +54,7 @@ import TrendingSearches from './components/TrendingSearches';
 import About from './components/About';
 import Privacy from './components/Privacy';
 import Tips from './components/Tips';
+import SubscriptionPage from './components/SubscriptionPage';
 
 function App() {
   const [darkMode, setDarkMode] = useState(true);
@@ -330,6 +331,21 @@ function App() {
     setDialogOpen(false);
   };
 
+  const renderDialogContent = () => {
+    switch (dialogContent) {
+      case 'about':
+        return <About />;
+      case 'tips':
+        return <Tips />;
+      case 'privacy':
+        return <Privacy />;
+      case 'subscribe':
+        return <SubscriptionPage />;
+      default:
+        return null;
+    }
+  };
+
   return (
     <ErrorBoundary>
       <ThemeProvider theme={theme}>
@@ -354,6 +370,21 @@ function App() {
                   }}
                 >
                   About
+                </Typography>
+                <Typography
+                  component="button"
+                  onClick={() => handleNavClick('subscribe')}
+                  sx={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'primary.main',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    '&:hover': { color: 'primary.dark' },
+                    transition: 'color 0.2s'
+                  }}
+                >
+                  Upgrade
                 </Typography>
                 <Typography
                   component="button"
@@ -769,27 +800,21 @@ function App() {
             browserLang={browserLang}
           />
 
-          {/* Navigation Dialog */}
+          {/* Dialog for About, Tips, Privacy, and Subscribe */}
           <Dialog
             open={dialogOpen}
             onClose={handleDialogClose}
             maxWidth="md"
             fullWidth
+            sx={{
+              '& .MuiDialog-paper': {
+                borderRadius: 3,
+                m: 2,
+              }
+            }}
           >
-            <DialogContent>
-              <IconButton
-                onClick={handleDialogClose}
-                sx={{
-                  position: 'absolute',
-                  right: 8,
-                  top: 8,
-                }}
-              >
-                <CloseIcon />
-              </IconButton>
-              {dialogContent === 'about' && <About />}
-              {dialogContent === 'privacy' && <Privacy />}
-              {dialogContent === 'tips' && <Tips />}
+            <DialogContent sx={{ p: 0 }}>
+              {renderDialogContent()}
             </DialogContent>
           </Dialog>
         </Box>
