@@ -1,0 +1,73 @@
+# This file specifies files that are *not* uploaded to Google Cloud
+# using gcloud. It follows the same syntax as .gitignore, with the addition of
+# "#!include" directives (which insert the entries of the given .gitignore-style
+# file at that point).
+
+.gcloudignore
+.git
+.gitignore
+
+# Python pycache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Frontend (not needed for backend deployment)
+frontend/
+node_modules/
+
+# Documentation
+docs/
+*.md
+README*
+LICENSE
+
+# IDE
+.vscode/
+.idea/
+
+# Scripts
+scripts/
+
+# Tests
+tests/
+pytest_cache/
+.coverage
+
+# Environment files (using Cloud Run secrets instead)
+.env
+.env.*
+
+# GPG and CI files
+GPG_*
+COMMIT_SIGNING_*
+CI_STATUS_SUMMARY.md
+
+# GitHub
+.github/
+
+# Firebase files
+firebase.json
+.firebaserc
+
+# Docker files (Cloud Build uses these directly)
+# Note: Don't ignore Dockerfile or .dockerignore
+
+# Temporary files
+*.log
+*.tmp
+temp/
+tmp/
+
+# MongoDB data files
+*.json
+*.csv
+data/
+
+# Mac files
+.DS_Store 

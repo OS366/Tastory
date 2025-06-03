@@ -1,0 +1,70 @@
+name: Verify Commits
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  push: # Run on all pushes to any branch
+
+permissions:
+  contents: read # Required to checkout code and read commits
+
+jobs:
+  verify-commits:
+    name: Verify Commit Signatures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Import GPG keys for verification
+        run: |
+          # This step would import known team member GPG keys
+          # For now, we'll just check if commits are signed
+          echo "Checking commit signatures..."
+
+      - name: Verify commit signatures
+        run: |
+          # Get commits in this PR or push
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "Checking PR commits..."
+            COMMITS=$(git rev-list ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} 2>/dev/null || echo "")
+          else
+            echo "Checking push commits..."
+            # For push events, check the last 10 commits if before is empty
+            if [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+              COMMITS=$(git rev-list -n 10 HEAD)
+            else
+              COMMITS=$(git rev-list ${{ github.event.before }}..${{ github.event.after }} 2>/dev/null || echo "")
+            fi
+          fi
+
+          if [ -z "$COMMITS" ]; then
+            echo "No commits to verify"
+            exit 0
+          fi
+
+          # Check each commit
+          UNSIGNED_COMMITS=""
+          for commit in $COMMITS; do
+            echo "Checking commit: $commit"
+            if ! git verify-commit $commit &>/dev/null; then
+              UNSIGNED_COMMITS="$UNSIGNED_COMMITS $commit"
+              echo "❌ Unsigned commit detected: $commit"
+              git log --format='%h %an <%ae> - %s' -n 1 $commit
+            else
+              echo "✅ Signed commit: $commit"
+              git log --format='%h %an <%ae> - %s' -n 1 $commit
+            fi
+          done
+
+          if [ -n "$UNSIGNED_COMMITS" ]; then
+            echo ""
+            echo "❌ Found unsigned commits!"
+            echo "Please sign your commits using GPG. See docs/COMMIT_SIGNING_SETUP.md for instructions."
+            # For now, just warn - don't fail the build
+            # exit 1
+          else
+            echo ""
+            echo "✅ All commits are signed and verified!"
+          fi

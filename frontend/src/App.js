@@ -47,6 +47,7 @@ import {
   Stop as StopIcon,
   RestaurantMenu as RestaurantMenuIcon
 } from '@mui/icons-material';
+import ErrorBoundary, { ErrorPage } from './ErrorBoundary';
 
 function App() {
   const [darkMode, setDarkMode] = useState(true);
@@ -64,8 +65,28 @@ function App() {
   const [drawerContent, setDrawerContent] = useState('info');
   const [suggestionTimer, setSuggestionTimer] = useState(null);
   const [browserLang, setBrowserLang] = useState('en');
+  const [backendError, setBackendError] = useState(null);
 
   const prefersDarkMode = useMediaQuery('(prefers-color-scheme: dark)');
+
+  // Get API URL - safe for browser environment
+  const getApiUrl = () => {
+    // Check if we're in production (Firebase hosting)
+    if (window.location.hostname === 'tastory-hackathon.web.app' || 
+        window.location.hostname === 'tastory-hackathon.firebaseapp.com') {
+      return 'https://tastory-api-vbx2teipca-uc.a.run.app';
+    }
+    
+    // Check if process.env exists and has our variable
+    if (typeof process !== 'undefined' && process.env && process.env.REACT_APP_API_URL) {
+      return process.env.REACT_APP_API_URL;
+    }
+    
+    // Default to localhost for development
+    return 'http://localhost:5001';
+  };
+
+  const API_URL = getApiUrl();
 
   // Create gold theme
   const theme = createTheme({
@@ -173,14 +194,17 @@ function App() {
     }
 
     try {
-      const response = await fetch(`http://localhost:5001/suggest?query=${encodeURIComponent(query)}`);
-      if (response.ok) {
-        const data = await response.json();
-        setSuggestions(data);
+      const response = await fetch(`${API_URL}/suggest?query=${encodeURIComponent(query)}`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
+      const data = await response.json();
+      setSuggestions(data);
+      setBackendError(null); // Clear any previous errors
     } catch (error) {
       console.error('Error fetching suggestions:', error);
       setSuggestions([]);
+      // Don't set backend error for suggestions - just fail silently
     }
   };
 
@@ -190,13 +214,18 @@ function App() {
     
     setLoading(true);
     setSearchQuery(query);
+    setBackendError(null);
     
     try {
-      const response = await fetch('http://localhost:5001/chat', {
+      const response = await fetch(`${API_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: query, page: pageNum }),
       });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       
       const data = await response.json();
       
@@ -234,6 +263,7 @@ function App() {
       console.error('Search error:', error);
       setSearchResults([]);
       setTotalPages(0);
+      setBackendError(error);
     } finally {
       setLoading(false);
     }
@@ -260,454 +290,469 @@ function App() {
     // Extract the primary language code (e.g., 'es' from 'es-ES')
     const primaryLang = lang.split('-')[0];
     
-    // TEMPORARY: Force French for testing
-    setBrowserLang('fr');
-    console.log('FORCING FRENCH MODE FOR TESTING');
-    console.log('Actual browser language:', lang, 'Primary:', primaryLang);
-    
-    // Normal code (commented out for testing):
-    // setBrowserLang(primaryLang);
-    // console.log('Browser language detected:', lang, 'Primary:', primaryLang);
+    // Use actual browser language
+    setBrowserLang(primaryLang);
+    console.log('Browser language detected:', lang, 'Primary:', primaryLang);
   }, []);
 
-  return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      
-      {/* Header */}
-      <Box sx={{ position: 'absolute', top: 16, right: 16, zIndex: 10 }}>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <IconButton 
-            onClick={() => setShowFavorites(!showFavorites)}
-            color="primary"
-            sx={{ 
-              backgroundColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.04)',
-              '&:hover': {
-                backgroundColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.08)',
-              }
-            }}
-          >
-            <Badge badgeContent={Object.keys(favorites).length} color="error">
-              <FavoriteIcon />
-            </Badge>
-          </IconButton>
-          
-          <IconButton 
-            onClick={() => setDarkMode(!darkMode)} 
-            color="primary"
-            sx={{ 
-              backgroundColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.04)',
-              '&:hover': {
-                backgroundColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.08)',
-              }
-            }}
-          >
-            {darkMode ? <LightModeIcon /> : <DarkModeIcon />}
-          </IconButton>
-        </Box>
-      </Box>
+  // If there's a backend error, show the error page
+  if (backendError) {
+    return (
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <ErrorPage 
+          error={backendError} 
+          onRetry={() => {
+            setBackendError(null);
+            if (searchQuery) {
+              handleSearch(searchQuery, page);
+            }
+          }}
+        />
+      </ThemeProvider>
+    );
+  }
 
-      <Container maxWidth="xl" sx={{ py: 4, pt: 8 }}>
-        {/* Logo and Title Section */}
-        <Box sx={{ textAlign: 'center', mb: 6 }}>
-          <Box sx={{ position: 'relative', display: 'inline-block', mb: 2 }}>
-            <img 
-              src="/images/logo.png" 
-              alt="Tastory Logo" 
-              style={{ 
-                width: 100, 
-                height: 100, 
-                borderRadius: '50%', 
-                border: '4px solid #FFB300' 
-              }}
-            />
-            <Chip 
-              label="BETA" 
-              size="small" 
+  return (
+    <ErrorBoundary>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        
+        {/* Header */}
+        <Box sx={{ position: 'absolute', top: 16, right: 16, zIndex: 10 }}>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <IconButton 
+              onClick={() => setShowFavorites(!showFavorites)}
               color="primary"
               sx={{ 
-                position: 'absolute', 
-                top: -5, 
-                right: -5,
-                fontWeight: 700,
-                fontSize: '0.7rem'
-              }}
-            />
-          </Box>
-          <Typography variant="h1" component="h1" sx={{ mb: 1, color: 'primary.main', fontWeight: 800 }}>
-            Tastory
-          </Typography>
-          <Typography variant="h5" component="h2" sx={{ mb: 3, color: 'text.secondary', fontWeight: 300 }}>
-            The Food Search Engine
-          </Typography>
-        </Box>
-
-        {/* Search Bar */}
-        <Box sx={{ mb: 4 }}>
-          <Box sx={{ 
-            maxWidth: 600, 
-            mx: 'auto'
-          }}>
-            <Autocomplete
-              freeSolo
-              options={suggestions}
-              inputValue={searchQuery}
-              onInputChange={(event, newValue) => {
-                setSearchQuery(newValue);
-                
-                // Clear existing timer
-                if (suggestionTimer) {
-                  clearTimeout(suggestionTimer);
-                }
-                
-                // Set new timer for debounced suggestion fetch
-                const newTimer = setTimeout(() => {
-                  fetchSuggestions(newValue);
-                }, 300);
-                
-                setSuggestionTimer(newTimer);
-              }}
-              renderOption={(props, option) => (
-                <Box 
-                  component="li" 
-                  {...props} 
-                  sx={{ 
-                    py: 1.5, 
-                    px: 2,
-                    '&:hover': {
-                      backgroundColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 179, 0, 0.08)',
-                    }
-                  }}
-                >
-                  <SearchIcon sx={{ mr: 1.5, color: 'text.secondary', fontSize: 20 }} />
-                  <Typography variant="body2" sx={{ fontWeight: 500 }}>{option}</Typography>
-                </Box>
-              )}
-              sx={{
-                '& .MuiAutocomplete-popupIndicator': { display: 'none' },
-                '& .MuiAutocomplete-clearIndicator': { display: 'none' }
-              }}
-              componentsProps={{
-                paper: {
-                  sx: {
-                    mt: 1,
-                    borderRadius: '12px',
-                    boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
-                    border: theme => theme.palette.mode === 'dark' ? '1px solid rgba(255, 255, 255, 0.1)' : 'none',
-                  }
+                backgroundColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.04)',
+                '&:hover': {
+                  backgroundColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.08)',
                 }
               }}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  fullWidth
-                  placeholder="Search for any recipe, ingredient, or cuisine..."
-                  variant="outlined"
-                  onKeyPress={(event) => {
-                    if (event.key === 'Enter' && searchQuery.trim()) {
-                      event.preventDefault();
-                      handleSearch(searchQuery);
-                    }
-                  }}
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      paddingRight: '4px',
-                      backgroundColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.09)' : '#fff',
-                      border: '1px solid',
-                      borderColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.23)' : 'rgba(0, 0, 0, 0.23)',
-                      borderRadius: '12px',
-                      transition: 'all 0.2s ease',
-                      '&:hover': {
-                        borderColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)',
-                        backgroundColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.11)' : '#fff',
-                      },
-                      '&.Mui-focused': {
-                        borderColor: '#FFB300',
-                        boxShadow: '0 0 0 2px rgba(255, 179, 0, 0.1)',
-                      },
-                      '& fieldset': {
-                        border: 'none',
-                      }
-                    },
-                    '& .MuiInputBase-input': {
-                      fontSize: { xs: '0.875rem', sm: '1rem' },
-                      fontWeight: 500,
-                    }
-                  }}
-                  InputProps={{
-                    ...params.InputProps,
-                    sx: {
-                      height: { xs: 48, sm: 56 },
-                      pr: { xs: '110px', sm: '130px' },
-                      display: 'flex',
-                      alignItems: 'center',
-                      position: 'relative',
-                      '& .MuiInputBase-input': {
-                        pr: 0
-                      },
-                      '& .MuiAutocomplete-endAdornment': {
-                        display: 'none'
-                      }
-                    },
-                    endAdornment: (
-                      <Box sx={{ 
-                        position: 'absolute',
-                        right: 8,
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        display: 'flex', 
-                        alignItems: 'center',
-                        zIndex: 1
-                      }}>
-                        <Button
-                          variant="contained"
-                          color="primary"
-                          onClick={() => handleSearch(searchQuery)}
-                          startIcon={<SearchIcon />}
-                          sx={{ 
-                            height: { xs: 36, sm: 40 },
-                            borderRadius: '8px',
-                            px: { xs: 2, sm: 3 },
-                            fontSize: { xs: '0.875rem', sm: '1rem' },
-                            fontWeight: 600,
-                            boxShadow: 'none',
-                            textTransform: 'none',
-                            background: '#FFB300',
-                            color: '#000',
-                            transition: 'all 0.2s ease',
-                            '&:hover': {
-                              background: '#FFA000',
-                              boxShadow: '0 2px 8px rgba(255, 179, 0, 0.3)',
-                              transform: 'translateY(-1px)',
-                            },
-                            '&:active': {
-                              transform: 'translateY(0) scale(0.98)',
-                            },
-                            '& .MuiButton-startIcon': {
-                              mr: { xs: 0.5, sm: 1 }
-                            }
-                          }}
-                        >
-                          Search
-                        </Button>
-                      </Box>
-                    ),
-                  }}
-                />
-              )}
-            />
+            >
+              <Badge badgeContent={Object.keys(favorites).length} color="error">
+                <FavoriteIcon />
+              </Badge>
+            </IconButton>
+            
+            <IconButton 
+              onClick={() => setDarkMode(!darkMode)} 
+              color="primary"
+              sx={{ 
+                backgroundColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.04)',
+                '&:hover': {
+                  backgroundColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.08)',
+                }
+              }}
+            >
+              {darkMode ? <LightModeIcon /> : <DarkModeIcon />}
+            </IconButton>
           </Box>
         </Box>
 
-        {/* Search Engine Features */}
-        {!loading && searchResults.length === 0 && !showFavorites && (
-          <Box sx={{ 
-            textAlign: 'center', 
-            mb: 4,
-            py: 3,
-            px: 2,
-            backgroundColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(255, 179, 0, 0.05)',
-            borderRadius: 2,
-            maxWidth: 800,
-            mx: 'auto'
-          }}>
-            <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
-              🔍 Powered by AI-driven food intelligence
-            </Typography>
-            <Grid container spacing={3} justifyContent="center">
-              <Grid item xs={12} sm={4}>
-                <Typography variant="h4" sx={{ color: 'primary.main', fontWeight: 700 }}>
-                  230K+
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Searchable Recipes
-                </Typography>
-              </Grid>
-              <Grid item xs={12} sm={4}>
-                <Typography variant="h4" sx={{ color: 'primary.main', fontWeight: 700 }}>
-                  {'<2s'}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Search Response Time
-                </Typography>
-              </Grid>
-              <Grid item xs={12} sm={4}>
-                <Typography variant="h4" sx={{ color: 'primary.main', fontWeight: 700 }}>
-                  15+
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Cuisine Types
-                </Typography>
-              </Grid>
-            </Grid>
-            <Box sx={{ mt: 3 }}>
-              <Typography variant="body2" sx={{ fontStyle: 'italic', color: 'text.secondary' }}>
-                Try searching: "spicy chicken", "vegan pasta", "30 minute dinner", or "chocolate dessert"
-              </Typography>
-            </Box>
-          </Box>
-        )}
-
-        {/* Recent Searches */}
-        {recentSearches.length > 0 && !showFavorites && (
-          <Box sx={{ mb: 4, maxWidth: 800, mx: 'auto' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-              <Typography variant="h6" sx={{ flexGrow: 1 }}>
-                Recent Searches
-              </Typography>
-              <Button 
-                size="small" 
-                onClick={() => {
-                  setRecentSearches([]);
-                  localStorage.removeItem('tastoryRecentSearches');
+        <Container maxWidth="xl" sx={{ py: 4, pt: 8 }}>
+          {/* Logo and Title Section */}
+          <Box sx={{ textAlign: 'center', mb: 6 }}>
+            <Box sx={{ position: 'relative', display: 'inline-block', mb: 2 }}>
+              <img 
+                src="/images/logo.png" 
+                alt="Tastory Logo" 
+                style={{ 
+                  width: 100, 
+                  height: 100, 
+                  borderRadius: '50%', 
+                  border: '4px solid #FFB300' 
                 }}
-                sx={{ textTransform: 'none', color: 'text.secondary' }}
-              >
-                Clear history
-              </Button>
+              />
+              <Chip 
+                label="BETA" 
+                size="small" 
+                color="primary"
+                sx={{ 
+                  position: 'absolute', 
+                  top: -5, 
+                  right: -5,
+                  fontWeight: 700,
+                  fontSize: '0.7rem'
+                }}
+              />
             </Box>
-            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-              {recentSearches.map((search, index) => (
-                <Chip
-                  key={index}
-                  label={search}
-                  onClick={() => handleSearch(search)}
-                  onDelete={() => {
-                    const newSearches = recentSearches.filter((_, i) => i !== index);
-                    setRecentSearches(newSearches);
-                    localStorage.setItem('tastoryRecentSearches', JSON.stringify(newSearches));
-                  }}
-                  color="primary"
-                  variant="outlined"
-                  icon={<SearchIcon sx={{ fontSize: 16 }} />}
-                  sx={{ 
-                    '&:hover': { 
-                      backgroundColor: 'primary.main',
-                      color: 'primary.contrastText',
-                      '& .MuiChip-deleteIcon': {
-                        color: 'primary.contrastText'
+            <Typography variant="h1" component="h1" sx={{ mb: 1, color: 'primary.main', fontWeight: 800 }}>
+              Tastory
+            </Typography>
+            <Typography variant="h5" component="h2" sx={{ mb: 3, color: 'text.secondary', fontWeight: 300 }}>
+              The Food Search Engine
+            </Typography>
+          </Box>
+
+          {/* Search Bar */}
+          <Box sx={{ mb: 4 }}>
+            <Box sx={{ 
+              maxWidth: 600, 
+              mx: 'auto'
+            }}>
+              <Autocomplete
+                freeSolo
+                options={suggestions}
+                inputValue={searchQuery}
+                onInputChange={(event, newValue) => {
+                  setSearchQuery(newValue);
+                  
+                  // Clear existing timer
+                  if (suggestionTimer) {
+                    clearTimeout(suggestionTimer);
+                  }
+                  
+                  // Set new timer for debounced suggestion fetch
+                  const newTimer = setTimeout(() => {
+                    fetchSuggestions(newValue);
+                  }, 300);
+                  
+                  setSuggestionTimer(newTimer);
+                }}
+                renderOption={(props, option) => (
+                  <Box 
+                    component="li" 
+                    {...props} 
+                    sx={{ 
+                      py: 1.5, 
+                      px: 2,
+                      '&:hover': {
+                        backgroundColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 179, 0, 0.08)',
                       }
+                    }}
+                  >
+                    <SearchIcon sx={{ mr: 1.5, color: 'text.secondary', fontSize: 20 }} />
+                    <Typography variant="body2" sx={{ fontWeight: 500 }}>{option}</Typography>
+                  </Box>
+                )}
+                sx={{
+                  '& .MuiAutocomplete-popupIndicator': { display: 'none' },
+                  '& .MuiAutocomplete-clearIndicator': { display: 'none' }
+                }}
+                componentsProps={{
+                  paper: {
+                    sx: {
+                      mt: 1,
+                      borderRadius: '12px',
+                      boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
+                      border: theme => theme.palette.mode === 'dark' ? '1px solid rgba(255, 255, 255, 0.1)' : 'none',
                     }
-                  }}
-                />
-              ))}
+                  }
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    fullWidth
+                    placeholder="Search for any recipe, ingredient, or cuisine..."
+                    variant="outlined"
+                    onKeyPress={(event) => {
+                      if (event.key === 'Enter' && searchQuery.trim()) {
+                        event.preventDefault();
+                        handleSearch(searchQuery);
+                      }
+                    }}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        paddingRight: '4px',
+                        backgroundColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.09)' : '#fff',
+                        border: '1px solid',
+                        borderColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.23)' : 'rgba(0, 0, 0, 0.23)',
+                        borderRadius: '12px',
+                        transition: 'all 0.2s ease',
+                        '&:hover': {
+                          borderColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)',
+                          backgroundColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.11)' : '#fff',
+                        },
+                        '&.Mui-focused': {
+                          borderColor: '#FFB300',
+                          boxShadow: '0 0 0 2px rgba(255, 179, 0, 0.1)',
+                        },
+                        '& fieldset': {
+                          border: 'none',
+                        }
+                      },
+                      '& .MuiInputBase-input': {
+                        fontSize: { xs: '0.875rem', sm: '1rem' },
+                        fontWeight: 500,
+                      }
+                    }}
+                    InputProps={{
+                      ...params.InputProps,
+                      sx: {
+                        height: { xs: 48, sm: 56 },
+                        pr: { xs: '110px', sm: '130px' },
+                        display: 'flex',
+                        alignItems: 'center',
+                        position: 'relative',
+                        '& .MuiInputBase-input': {
+                          pr: 0
+                        },
+                        '& .MuiAutocomplete-endAdornment': {
+                          display: 'none'
+                        }
+                      },
+                      endAdornment: (
+                        <Box sx={{ 
+                          position: 'absolute',
+                          right: 8,
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          display: 'flex', 
+                          alignItems: 'center',
+                          zIndex: 1
+                        }}>
+                          <Button
+                            variant="contained"
+                            color="primary"
+                            onClick={() => handleSearch(searchQuery)}
+                            startIcon={<SearchIcon />}
+                            sx={{ 
+                              height: { xs: 36, sm: 40 },
+                              borderRadius: '8px',
+                              px: { xs: 2, sm: 3 },
+                              fontSize: { xs: '0.875rem', sm: '1rem' },
+                              fontWeight: 600,
+                              boxShadow: 'none',
+                              textTransform: 'none',
+                              background: '#FFB300',
+                              color: '#000',
+                              transition: 'all 0.2s ease',
+                              '&:hover': {
+                                background: '#FFA000',
+                                boxShadow: '0 2px 8px rgba(255, 179, 0, 0.3)',
+                                transform: 'translateY(-1px)',
+                              },
+                              '&:active': {
+                                transform: 'translateY(0) scale(0.98)',
+                              },
+                              '& .MuiButton-startIcon': {
+                                mr: { xs: 0.5, sm: 1 }
+                              }
+                            }}
+                          >
+                            Search
+                          </Button>
+                        </Box>
+                      ),
+                    }}
+                  />
+                )}
+              />
             </Box>
           </Box>
-        )}
 
-        {/* Loading */}
-        {loading && (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-            <CircularProgress size={60} />
-          </Box>
-        )}
-
-        {/* Results or Favorites */}
-        {!loading && (
-          <>
-            {showFavorites ? (
-              // Favorites View
-              <Box>
-                <Typography variant="h4" gutterBottom>
-                  Your Favorite Recipes
+          {/* Search Engine Features */}
+          {!loading && searchResults.length === 0 && !showFavorites && (
+            <Box sx={{ 
+              textAlign: 'center', 
+              mb: 4,
+              py: 3,
+              px: 2,
+              backgroundColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(255, 179, 0, 0.05)',
+              borderRadius: 2,
+              maxWidth: 800,
+              mx: 'auto'
+            }}>
+              <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
+                🔍 Powered by AI-driven food intelligence
+              </Typography>
+              <Grid container spacing={3} justifyContent="center">
+                <Grid item xs={12} sm={4}>
+                  <Typography variant="h4" sx={{ color: 'primary.main', fontWeight: 700 }}>
+                    230K+
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Searchable Recipes
+                  </Typography>
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <Typography variant="h4" sx={{ color: 'primary.main', fontWeight: 700 }}>
+                    {'<2s'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Search Response Time
+                  </Typography>
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <Typography variant="h4" sx={{ color: 'primary.main', fontWeight: 700 }}>
+                    15+
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Cuisine Types
+                  </Typography>
+                </Grid>
+              </Grid>
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="body2" sx={{ fontStyle: 'italic', color: 'text.secondary' }}>
+                  Try searching: "spicy chicken", "vegan pasta", "30 minute dinner", or "chocolate dessert"
                 </Typography>
-                <Grid 
-                  container 
-                  spacing={2}
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: {
-                      xs: '1fr',
-                      sm: 'repeat(2, 1fr)',
-                      md: 'repeat(3, 1fr)',
-                      lg: 'repeat(4, 1fr)'
-                    },
-                    gap: 2
-                  }}
-                >
-                  {Object.values(favorites).map((recipe) => (
-                    <Box key={recipe.id}>
-                      <RecipeCard
-                        recipe={recipe}
-                        isFavorite={true}
-                        onToggleFavorite={() => toggleFavorite(recipe)}
-                        onOpenDetails={() => {
-                          setSelectedRecipe(recipe);
-                          setDrawerOpen(true);
-                        }}
-                      />
-                    </Box>
-                  ))}
-                </Grid>
               </Box>
-            ) : (
-              // Search Results
-              <>
-                {searchResults.length > 0 && (
-                  <Box sx={{ mb: 3, color: 'text.secondary' }}>
-                    <Typography variant="body2">
-                      About {totalPages * 12} results found for "<strong>{searchQuery}</strong>" in 0.{Math.floor(Math.random() * 9) + 1}s
-                    </Typography>
-                  </Box>
-                )}
-                
-                <Grid 
-                  container 
-                  spacing={2}
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: {
-                      xs: '1fr',
-                      sm: 'repeat(2, 1fr)',
-                      md: 'repeat(3, 1fr)',
-                      lg: 'repeat(4, 1fr)'
-                    },
-                    gap: 2
+            </Box>
+          )}
+
+          {/* Recent Searches */}
+          {recentSearches.length > 0 && !showFavorites && (
+            <Box sx={{ mb: 4, maxWidth: 800, mx: 'auto' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6" sx={{ flexGrow: 1 }}>
+                  Recent Searches
+                </Typography>
+                <Button 
+                  size="small" 
+                  onClick={() => {
+                    setRecentSearches([]);
+                    localStorage.removeItem('tastoryRecentSearches');
                   }}
+                  sx={{ textTransform: 'none', color: 'text.secondary' }}
                 >
-                  {searchResults.map((recipe) => (
-                    <Box key={recipe.id}>
-                      <RecipeCard
-                        recipe={recipe}
-                        isFavorite={!!favorites[recipe.id]}
-                        onToggleFavorite={() => toggleFavorite(recipe)}
-                        onOpenDetails={() => {
-                          setSelectedRecipe(recipe);
-                          setDrawerOpen(true);
-                        }}
+                  Clear history
+                </Button>
+              </Box>
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                {recentSearches.map((search, index) => (
+                  <Chip
+                    key={index}
+                    label={search}
+                    onClick={() => handleSearch(search)}
+                    onDelete={() => {
+                      const newSearches = recentSearches.filter((_, i) => i !== index);
+                      setRecentSearches(newSearches);
+                      localStorage.setItem('tastoryRecentSearches', JSON.stringify(newSearches));
+                    }}
+                    color="primary"
+                    variant="outlined"
+                    icon={<SearchIcon sx={{ fontSize: 16 }} />}
+                    sx={{ 
+                      '&:hover': { 
+                        backgroundColor: 'primary.main',
+                        color: 'primary.contrastText',
+                        '& .MuiChip-deleteIcon': {
+                          color: 'primary.contrastText'
+                        }
+                      }
+                    }}
+                  />
+                ))}
+              </Box>
+            </Box>
+          )}
+
+          {/* Loading */}
+          {loading && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
+              <CircularProgress size={60} />
+            </Box>
+          )}
+
+          {/* Results or Favorites */}
+          {!loading && (
+            <>
+              {showFavorites ? (
+                // Favorites View
+                <Box>
+                  <Typography variant="h4" gutterBottom>
+                    Your Favorite Recipes
+                  </Typography>
+                  <Grid 
+                    container 
+                    spacing={2}
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: {
+                        xs: '1fr',
+                        sm: 'repeat(2, 1fr)',
+                        md: 'repeat(3, 1fr)',
+                        lg: 'repeat(4, 1fr)'
+                      },
+                      gap: 2
+                    }}
+                  >
+                    {Object.values(favorites).map((recipe) => (
+                      <Box key={recipe.id}>
+                        <RecipeCard
+                          recipe={recipe}
+                          isFavorite={true}
+                          onToggleFavorite={() => toggleFavorite(recipe)}
+                          onOpenDetails={() => {
+                            setSelectedRecipe(recipe);
+                            setDrawerOpen(true);
+                          }}
+                        />
+                      </Box>
+                    ))}
+                  </Grid>
+                </Box>
+              ) : (
+                // Search Results
+                <>
+                  {searchResults.length > 0 && (
+                    <Box sx={{ mb: 3, color: 'text.secondary' }}>
+                      <Typography variant="body2">
+                        About {totalPages * 12} results found for "<strong>{searchQuery}</strong>" in 0.{Math.floor(Math.random() * 9) + 1}s
+                      </Typography>
+                    </Box>
+                  )}
+                  
+                  <Grid 
+                    container 
+                    spacing={2}
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: {
+                        xs: '1fr',
+                        sm: 'repeat(2, 1fr)',
+                        md: 'repeat(3, 1fr)',
+                        lg: 'repeat(4, 1fr)'
+                      },
+                      gap: 2
+                    }}
+                  >
+                    {searchResults.map((recipe) => (
+                      <Box key={recipe.id}>
+                        <RecipeCard
+                          recipe={recipe}
+                          isFavorite={!!favorites[recipe.id]}
+                          onToggleFavorite={() => toggleFavorite(recipe)}
+                          onOpenDetails={() => {
+                            setSelectedRecipe(recipe);
+                            setDrawerOpen(true);
+                          }}
+                        />
+                      </Box>
+                    ))}
+                  </Grid>
+
+                  {/* Pagination */}
+                  {totalPages > 1 && (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+                      <Pagination
+                        count={totalPages}
+                        page={page}
+                        onChange={(e, value) => handleSearch(searchQuery, value)}
+                        color="primary"
+                        size="large"
                       />
                     </Box>
-                  ))}
-                </Grid>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </Container>
 
-                {/* Pagination */}
-                {totalPages > 1 && (
-                  <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-                    <Pagination
-                      count={totalPages}
-                      page={page}
-                      onChange={(e, value) => handleSearch(searchQuery, value)}
-                      color="primary"
-                      size="large"
-                    />
-                  </Box>
-                )}
-              </>
-            )}
-          </>
-        )}
-      </Container>
-
-      {/* Recipe Details Drawer */}
-      <RecipeDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        recipe={selectedRecipe}
-        drawerContent={drawerContent}
-        setDrawerContent={setDrawerContent}
-        browserLang={browserLang}
-      />
-    </ThemeProvider>
+        {/* Recipe Details Drawer */}
+        <RecipeDrawer
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          recipe={selectedRecipe}
+          drawerContent={drawerContent}
+          setDrawerContent={setDrawerContent}
+          browserLang={browserLang}
+        />
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }
 
