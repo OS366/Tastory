@@ -67,6 +67,25 @@ function App() {
 
   const prefersDarkMode = useMediaQuery('(prefers-color-scheme: dark)');
 
+  // Get API URL - safe for browser environment
+  const getApiUrl = () => {
+    // Check if we're in production (Firebase hosting)
+    if (window.location.hostname === 'tastory-hackathon.web.app' || 
+        window.location.hostname === 'tastory-hackathon.firebaseapp.com') {
+      return 'https://tastory-api-vbx2teipca-uc.a.run.app';
+    }
+    
+    // Check if process.env exists and has our variable
+    if (typeof process !== 'undefined' && process.env && process.env.REACT_APP_API_URL) {
+      return process.env.REACT_APP_API_URL;
+    }
+    
+    // Default to localhost for development
+    return 'http://localhost:5001';
+  };
+
+  const API_URL = getApiUrl();
+
   // Create gold theme
   const theme = createTheme({
     palette: {
@@ -173,7 +192,7 @@ function App() {
     }
 
     try {
-      const response = await fetch(`http://localhost:5001/suggest?query=${encodeURIComponent(query)}`);
+      const response = await fetch(`${API_URL}/suggest?query=${encodeURIComponent(query)}`);
       if (response.ok) {
         const data = await response.json();
         setSuggestions(data);
@@ -192,7 +211,7 @@ function App() {
     setSearchQuery(query);
     
     try {
-      const response = await fetch('http://localhost:5001/chat', {
+      const response = await fetch(`${API_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: query, page: pageNum }),
@@ -260,14 +279,9 @@ function App() {
     // Extract the primary language code (e.g., 'es' from 'es-ES')
     const primaryLang = lang.split('-')[0];
     
-    // TEMPORARY: Force French for testing
-    setBrowserLang('fr');
-    console.log('FORCING FRENCH MODE FOR TESTING');
-    console.log('Actual browser language:', lang, 'Primary:', primaryLang);
-    
-    // Normal code (commented out for testing):
-    // setBrowserLang(primaryLang);
-    // console.log('Browser language detected:', lang, 'Primary:', primaryLang);
+    // Use actual browser language
+    setBrowserLang(primaryLang);
+    console.log('Browser language detected:', lang, 'Primary:', primaryLang);
   }, []);
 
   return (
