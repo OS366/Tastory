@@ -20,6 +20,7 @@ CORS(app)
 
 # Initialize Stripe
 stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
 
 # --- Load Embedding Model ---
 MODEL_NAME = "all-MiniLM-L6-v2"
@@ -927,6 +928,204 @@ def create_checkout_session():
     except Exception as e:
         return jsonify({'error': str(e)}), 403
 
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    event = None
+    payload = request.data
+    sig_header = request.headers.get('Stripe-Signature')
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, STRIPE_WEBHOOK_SECRET
+        )
+    except ValueError as e:
+        # Invalid payload
+        return jsonify({'error': str(e)}), 400
+    except stripe.error.SignatureVerificationError as e:
+        # Invalid signature
+        return jsonify({'error': str(e)}), 400
+
+    # Handle the event
+    if event.type == 'checkout.session.completed':
+        session = event.data.object
+        # Set up the customer for success
+        handle_checkout_session(session)
+    elif event.type == 'customer.subscription.updated':
+        subscription = event.data.object
+        handle_subscription_updated(subscription)
+    elif event.type == 'customer.subscription.deleted':
+        subscription = event.data.object
+        handle_subscription_deleted(subscription)
+    elif event.type == 'invoice.paid':
+        invoice = event.data.object
+        handle_invoice_paid(invoice)
+    elif event.type == 'invoice.payment_failed':
+        invoice = event.data.object
+        handle_invoice_failed(invoice)
+
+    return jsonify({'status': 'success'})
+
+def handle_checkout_session(session):
+    """Handle successful checkout session."""
+    customer_id = session.get('customer')
+    subscription_id = session.get('subscription')
+    
+    if not customer_id or not subscription_id:
+        logging.error("Missing customer_id or subscription_id in session")
+        return
+    
+    try:
+        # Get customer details
+        customer = stripe.Customer.retrieve(customer_id)
+        subscription = stripe.Subscription.retrieve(subscription_id)
+        
+        # Store subscription info in MongoDB
+        if db is not None:
+            subscriptions = db.subscriptions
+            subscriptions.update_one(
+                {'customer_id': customer_id},
+                {
+                    '$set': {
+                        'customer_id': customer_id,
+                        'subscription_id': subscription_id,
+                        'email': customer.email,
+                        'status': subscription.status,
+                        'current_period_end': datetime.fromtimestamp(subscription.current_period_end),
+                        'updated_at': datetime.utcnow()
+                    }
+                },
+                upsert=True
+            )
+    except Exception as e:
+        logging.error(f"Error handling checkout session: {str(e)}")
+
+def handle_subscription_updated(subscription):
+    """Handle subscription updates."""
+    customer_id = subscription.get('customer')
+    subscription_id = subscription.get('id')
+    
+    if not customer_id or not subscription_id:
+        logging.error("Missing customer_id or subscription_id in subscription update")
+        return
+        
+    try:
+        if db is not None:
+            subscriptions = db.subscriptions
+            subscriptions.update_one(
+                {'subscription_id': subscription_id},
+                {
+                    '$set': {
+                        'status': subscription.status,
+                        'current_period_end': datetime.fromtimestamp(subscription.current_period_end),
+                        'updated_at': datetime.utcnow()
+                    }
+                }
+            )
+    except Exception as e:
+        logging.error(f"Error handling subscription update: {str(e)}")
+
+def handle_subscription_deleted(subscription):
+    """Handle subscription cancellations."""
+    customer_id = subscription.get('customer')
+    subscription_id = subscription.get('id')
+    
+    if not customer_id or not subscription_id:
+        logging.error("Missing customer_id or subscription_id in subscription deletion")
+        return
+        
+    try:
+        if db is not None:
+            subscriptions = db.subscriptions
+            subscriptions.update_one(
+                {'subscription_id': subscription_id},
+                {
+                    '$set': {
+                        'status': 'canceled',
+                        'canceled_at': datetime.utcnow(),
+                        'updated_at': datetime.utcnow()
+                    }
+                }
+            )
+    except Exception as e:
+        logging.error(f"Error handling subscription deletion: {str(e)}")
+
+def handle_invoice_paid(invoice):
+    """Handle successful invoice payments."""
+    customer_id = invoice.get('customer')
+    subscription_id = invoice.get('subscription')
+    
+    if not customer_id or not subscription_id:
+        logging.error("Missing customer_id or subscription_id in invoice")
+        return
+        
+    try:
+        if db is not None:
+            # Update subscription payment status
+            subscriptions = db.subscriptions
+            subscriptions.update_one(
+                {'subscription_id': subscription_id},
+                {
+                    '$set': {
+                        'last_payment_status': 'paid',
+                        'last_payment_date': datetime.utcnow(),
+                        'updated_at': datetime.utcnow()
+                    }
+                }
+            )
+            
+            # Store invoice record
+            invoices = db.invoices
+            invoices.insert_one({
+                'invoice_id': invoice.id,
+                'customer_id': customer_id,
+                'subscription_id': subscription_id,
+                'amount_paid': invoice.amount_paid,
+                'status': invoice.status,
+                'created_at': datetime.fromtimestamp(invoice.created),
+                'payment_date': datetime.utcnow()
+            })
+    except Exception as e:
+        logging.error(f"Error handling invoice payment: {str(e)}")
+
+def handle_invoice_failed(invoice):
+    """Handle failed invoice payments."""
+    customer_id = invoice.get('customer')
+    subscription_id = invoice.get('subscription')
+    
+    if not customer_id or not subscription_id:
+        logging.error("Missing customer_id or subscription_id in failed invoice")
+        return
+        
+    try:
+        if db is not None:
+            # Update subscription payment status
+            subscriptions = db.subscriptions
+            subscriptions.update_one(
+                {'subscription_id': subscription_id},
+                {
+                    '$set': {
+                        'last_payment_status': 'failed',
+                        'last_payment_attempt': datetime.utcnow(),
+                        'updated_at': datetime.utcnow()
+                    }
+                }
+            )
+            
+            # Store failed invoice record
+            invoices = db.invoices
+            invoices.insert_one({
+                'invoice_id': invoice.id,
+                'customer_id': customer_id,
+                'subscription_id': subscription_id,
+                'amount_due': invoice.amount_due,
+                'status': invoice.status,
+                'created_at': datetime.fromtimestamp(invoice.created),
+                'failure_date': datetime.utcnow(),
+                'failure_reason': invoice.get('last_payment_error', {}).get('message', 'Unknown error')
+            })
+    except Exception as e:
+        logging.error(f"Error handling failed invoice: {str(e)}")
 
 # TODO: Future Unique Endpoints
 # @app.route('/cooking-mode/<recipe_id>', methods=['POST'])
