@@ -13,9 +13,13 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from sentence_transformers import SentenceTransformer
+import stripe
 
 app = Flask(__name__)
 CORS(app)
+
+# Initialize Stripe
+stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
 
 # --- Load Embedding Model ---
 MODEL_NAME = "all-MiniLM-L6-v2"
@@ -894,6 +898,34 @@ def trending():
     except Exception as e:
         print(f"Error in /trending endpoint: {e}")
         return jsonify({"error": "Failed to fetch trending searches"}), 500
+
+
+@app.route('/create-checkout-session', methods=['POST'])
+def create_checkout_session():
+    try:
+        checkout_session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price_data': {
+                    'currency': 'usd',
+                    'product_data': {
+                        'name': 'Tastory Premium',
+                        'description': 'Access to premium features including advanced search, analytics, and more.',
+                    },
+                    'unit_amount': 500,  # $5.00 in cents
+                    'recurring': {
+                        'interval': 'month'
+                    }
+                },
+                'quantity': 1,
+            }],
+            mode='subscription',
+            success_url=os.getenv('FRONTEND_URL', 'http://localhost:3000') + '/success?session_id={CHECKOUT_SESSION_ID}',
+            cancel_url=os.getenv('FRONTEND_URL', 'http://localhost:3000') + '/canceled',
+        )
+        return jsonify({'id': checkout_session.id})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 403
 
 
 # TODO: Future Unique Endpoints

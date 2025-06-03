@@ -1,10 +1,10 @@
-name: Deploy to GCP
+name: Deploy to GCP (DISABLED)
 
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch: # Allow manual triggering
+  # push:
+  #   branches:
+  #     - main
+  workflow_dispatch: # Allow manual triggering only
 
 env:
   PROJECT_ID: tastory-hackathon
@@ -15,6 +15,7 @@ jobs:
   deploy-backend:
     name: Deploy Backend to Cloud Run
     runs-on: ubuntu-latest
+    if: false  # Temporarily disabled
 
     steps:
       - name: Checkout code
