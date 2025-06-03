@@ -733,4 +733,6 @@ def suggest():
 # - Real-time cooking sessions with other users
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    # Get port from environment variable (default to 5001 for local development)
+    port = int(os.environ.get("PORT", 5001))
+    app.run(host="0.0.0.0", port=port, debug=False)  # debug=False for production
