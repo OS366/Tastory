@@ -1,18 +1,16 @@
 import datetime
 import json
 import logging
-import math  # Required for math.ceil
+import math
 import os
 import re
 import uuid
 from datetime import datetime, timedelta
 
-import numpy as np
 import pymongo
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from sentence_transformers import SentenceTransformer
 import stripe
 
 app = Flask(__name__)
@@ -20,39 +18,7 @@ CORS(app)
 
 # Initialize Stripe
 stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
-
-# --- Load Embedding Model ---
-MODEL_NAME = "all-MiniLM-L6-v2"
-embedding_model = None
-try:
-    print(f"Loading sentence-transformer model: {MODEL_NAME}...")
-    embedding_model = SentenceTransformer(MODEL_NAME)
-    print(f"Model {MODEL_NAME} loaded successfully.")
-    _ = embedding_model.encode("Test sentence")
-    print("Test embedding generated successfully.")
-except Exception as e:
-    print(f"Error loading sentence-transformer model: {e}")
-    embedding_model = None
-
-# --- Recipe Embedding Configuration ---
-RECIPE_EMBEDDING_FIELD = "recipe_embedding_all_MiniLM_L6_v2"
-RECIPE_VECTOR_INDEX_NAME = "idx_recipes_vector"
-
-
-def get_embedding(text):
-    if embedding_model is None:
-        print("Embedding model is not available.")
-        return None
-    if not text or not isinstance(text, str):
-        print("Invalid input text for embedding.")
-        return None
-    try:
-        embedding = embedding_model.encode(text)
-        return embedding.tolist() if isinstance(embedding, np.ndarray) else embedding
-    except Exception as e:
-        print(f"Error generating embedding: {e}")
-        return None
-
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
 
 # --- MongoDB Connection ---
 def connect_to_mongodb():
@@ -68,19 +34,11 @@ def connect_to_mongodb():
         db = client[db_name]
         print("Successfully connected to MongoDB and pinged the server.")
         return client, db
-    except pymongo.errors.ConfigurationError as e:
-        print(f"MongoDB Configuration Error: {e}")
-        return None, None
-    except pymongo.errors.ConnectionFailure as e:
-        print(f"MongoDB Connection Failure: {e}")
-        return None, None
     except Exception as e:
         print(f"An unexpected error occurred during MongoDB connection: {e}")
         return None, None
 
-
 client, db = connect_to_mongodb()
-
 
 # --- Helper function to create a URL slug ---
 def slugify(text):
@@ -92,7 +50,6 @@ def slugify(text):
     text = re.sub(r"--+", "-", text)
     text = text.strip("-")
     return text
-
 
 # --- Helper function to generate star rating HTML ---
 def generate_star_rating(rating):
@@ -269,7 +226,8 @@ def chat():
 
     # Get the user message and pagination info
     data = request.get_json()
-    user_message = data.get("message", "")
+    user_message = data.get("message") or data.get("query", "")  # Handle both formats
+    user_message = user_message.strip()
     page = data.get("page", 1)
     per_page = 12  # Fixed at 12 for 4x3 grid
 
@@ -282,7 +240,6 @@ def chat():
         log_search_query(user_message, session_id, results_count=None)
     except Exception as e:
         print(f"Failed to log search query: {e}")
-        # Continue with search even if logging fails
 
     global client, db
     if db is None:
@@ -291,31 +248,62 @@ def chat():
         if db is None:
             return jsonify({"reply": "Error: Could not connect to the database. Please check server logs."}), 500
 
-    user_embedding = get_embedding(user_message)
-    if not user_embedding:
-        print("Failed to generate embedding for user message.")
-        return jsonify({"reply": "Sorry, I couldn't understand your message well enough to search for recipes."}), 500
+    try:
+        # Try exact text search first
+        recipes_collection = db[os.getenv("RECIPES_COLLECTION", "recipes")]
+        
+        # Split the query into words for exact matching
+        search_terms = user_message.lower().split()
+        
+        # Define cuisine categories and their related terms
+        cuisine_categories = {
+            "indian": ["indian", "chole", "puri", "curry", "masala", "naan", "roti", "biryani", "samosa"],
+            "italian": ["italian", "pasta", "pizza", "risotto", "lasagna"],
+            "dessert": ["dessert", "ice cream", "cake", "pie", "cookie", "chocolate", "sweet"],
+            "chinese": ["chinese", "noodles", "fried rice", "dimsum", "spring roll"],
+            "mexican": ["mexican", "taco", "burrito", "enchilada", "quesadilla"],
+        }
 
-    print(f"Generated embedding for user message (first 3 dims): {user_embedding[:3]}...")
+        # Detect cuisine type from search terms
+        detected_cuisine = None
+        for cuisine, terms in cuisine_categories.items():
+            if any(term in search_terms for term in terms):
+                detected_cuisine = cuisine
+                break
 
-    recipes_collection_name = os.getenv("RECIPES_COLLECTION", "recipes")
-    recipes_collection = db[recipes_collection_name]
+        # Create a more strict text search query with cuisine filtering
+        query_conditions = []
+        
+        # Add exact word matching conditions
+        for term in search_terms:
+            query_conditions.append({
+                "$or": [
+                    {"Name": {"$regex": f"\\b{term}\\b", "$options": "i"}},
+                    {"RecipeCategory": {"$regex": f"\\b{term}\\b", "$options": "i"}},
+                    {"Keywords": {"$regex": f"\\b{term}\\b", "$options": "i"}},
+                    {"RecipeIngredientParts": {"$regex": f"\\b{term}\\b", "$options": "i"}}
+                ]
+            })
 
-    # Optimized vector search pipeline - fetch only what we need for the current page
-    skip_amount = (page - 1) * per_page
-
-    vector_search_pipeline = [
-        {
-            "$vectorSearch": {
-                "index": RECIPE_VECTOR_INDEX_NAME,
-                "queryVector": user_embedding,
-                "path": RECIPE_EMBEDDING_FIELD,
-                "numCandidates": 20,  # Further reduced for faster search
-                "limit": 15,  # Just enough for one page plus a few extra
+        # If cuisine is detected, add cuisine-specific filtering
+        if detected_cuisine:
+            cuisine_terms = cuisine_categories[detected_cuisine]
+            cuisine_condition = {
+                "$or": [
+                    {"RecipeCategory": {"$regex": f"\\b({'|'.join(cuisine_terms)})\\b", "$options": "i"}},
+                    {"Keywords": {"$regex": f"\\b({'|'.join(cuisine_terms)})\\b", "$options": "i"}},
+                    {"Name": {"$regex": f"\\b({'|'.join(cuisine_terms)})\\b", "$options": "i"}}
+                ]
             }
-        },
-        {
-            "$project": {
+            query_conditions.append(cuisine_condition)
+
+        # Combine all conditions with $and
+        exact_match_query = {"$and": query_conditions}
+
+        # Execute exact match search
+        exact_results = list(recipes_collection.find(
+            exact_match_query,
+            {
                 "_id": 0,
                 "RecipeId": 1,
                 "Name": 1,
@@ -325,7 +313,6 @@ def chat():
                 "RecipeInstructions": 1,
                 "Images": 1,
                 "MainImage": 1,
-                "search_score": {"$meta": "vectorSearchScore"},
                 "Calories": 1,
                 "AuthorName": 1,
                 "DatePublished": 1,
@@ -344,23 +331,85 @@ def chat():
                 "AggregatedRating": 1,
                 "ReviewCount": 1,
             }
-        },
-        # Sort in MongoDB instead of Python for better performance
-        {"$sort": {"search_score": -1}},
-        # Limit results early to avoid processing too much data
-        {"$limit": 30},
-    ]
+        ).limit(30))
 
-    try:
-        # Execute the pipeline with a reasonable timeout
-        results = list(recipes_collection.aggregate(vector_search_pipeline, maxTimeMS=15000))
+        # If exact matches are too few, try fuzzy text search
+        if len(exact_results) < 5:  # Threshold for minimum results
+            # Create fuzzy search query
+            fuzzy_terms = []
+            for term in search_terms:
+                fuzzy_terms.append({"$regex": f"{term}", "$options": "i"})
+            
+            fuzzy_query = {
+                "$and": [
+                    {
+                        "$or": [
+                            {"Name": {"$in": fuzzy_terms}},
+                            {"RecipeCategory": {"$in": fuzzy_terms}},
+                            {"Keywords": {"$in": fuzzy_terms}},
+                            {"RecipeIngredientParts": {"$in": fuzzy_terms}}
+                        ]
+                    }
+                ]
+            }
 
-        # Sort results by image availability - process all results first
+            # If cuisine is detected, add cuisine filtering to fuzzy search
+            if detected_cuisine:
+                cuisine_terms = cuisine_categories[detected_cuisine]
+                cuisine_condition = {
+                    "$or": [
+                        {"RecipeCategory": {"$regex": f"({'|'.join(cuisine_terms)})", "$options": "i"}},
+                        {"Keywords": {"$regex": f"({'|'.join(cuisine_terms)})", "$options": "i"}},
+                        {"Name": {"$regex": f"({'|'.join(cuisine_terms)})", "$options": "i"}}
+                    ]
+                }
+                fuzzy_query["$and"].append(cuisine_condition)
+
+            # Execute fuzzy search
+            fuzzy_results = list(recipes_collection.find(
+                fuzzy_query,
+                {
+                    "_id": 0,
+                    "RecipeId": 1,
+                    "Name": 1,
+                    "Description": 1,
+                    "RecipeIngredientParts": 1,
+                    "RecipeIngredientQuantities": 1,
+                    "RecipeInstructions": 1,
+                    "Images": 1,
+                    "MainImage": 1,
+                    "Calories": 1,
+                    "AuthorName": 1,
+                    "DatePublished": 1,
+                    "RecipeServings": 1,
+                    "RecipeYield": 1,
+                    "PrepTime": 1,
+                    "RecipeCategory": 1,
+                    "FatContent": 1,
+                    "SaturatedFatContent": 1,
+                    "CholesterolContent": 1,
+                    "SodiumContent": 1,
+                    "CarbohydrateContent": 1,
+                    "FiberContent": 1,
+                    "SugarContent": 1,
+                    "ProteinContent": 1,
+                    "AggregatedRating": 1,
+                    "ReviewCount": 1,
+                }
+            ).limit(30))
+
+            # Combine exact and fuzzy results, removing duplicates
+            seen_ids = set(recipe["RecipeId"] for recipe in exact_results)
+            for recipe in fuzzy_results:
+                if recipe["RecipeId"] not in seen_ids:
+                    exact_results.append(recipe)
+                    seen_ids.add(recipe["RecipeId"])
+
+        # Process results
         recipes_with_images = []
         recipes_without_images = []
 
-        for recipe in results:
-            # Check if recipe has a valid image
+        for recipe in exact_results:
             has_image = False
             main_image = recipe.get("MainImage")
             images = recipe.get("Images", [])
@@ -378,30 +427,15 @@ def chat():
 
         # Combine results with images first
         sorted_results = recipes_with_images + recipes_without_images
-
-        # Quick count for total pages (estimate based on sorted results)
+        
+        # Calculate pagination
         total_results = len(sorted_results)
-        total_pages = max(1, min(3, math.ceil(total_results / per_page)))  # Cap at 3 pages for performance
-
-        # Get the recipes for current page
+        total_pages = max(1, min(3, math.ceil(total_results / per_page)))
         start_idx = (page - 1) * per_page
         end_idx = start_idx + per_page
         page_results = sorted_results[start_idx:end_idx]
 
-        # Update search log with results count
-        try:
-            session_id = request.headers.get('X-Session-ID', str(uuid.uuid4()))
-            # Update the log entry with results count
-            if db is not None:
-                db.search_logs.update_one(
-                    {"session_id": session_id, "query": user_message.lower().strip()},
-                    {"$set": {"results_count": total_results}},
-                    upsert=False
-                )
-        except Exception as e:
-            print(f"Failed to update search log with results count: {e}")
-
-        # Convert to simple JSON format instead of HTML
+        # Format results
         recipes_data = []
         for recipe in page_results:
             # Extract image URL
@@ -418,54 +452,10 @@ def chat():
             # Process ingredients
             ingredients = []
             ingredients_data = recipe.get("RecipeIngredientParts")
-            quantities_data = recipe.get("RecipeIngredientQuantities")
-
             if isinstance(ingredients_data, list):
-                # If we have quantities, combine them with ingredients
-                if isinstance(quantities_data, list):
-                    for i, ing in enumerate(ingredients_data):
-                        if ing and str(ing).strip():
-                            if i < len(quantities_data) and quantities_data[i]:
-                                quantity = str(quantities_data[i]).strip()
-                                # Skip NA, N/A, None, or similar non-quantity values
-                                if quantity.upper() in ["NA", "N/A", "NONE", "NULL", ""]:
-                                    ingredients.append(str(ing))
-                                else:
-                                    # Combine quantity with ingredient
-                                    ingredients.append(f"{quantity} {ing}")
-                            else:
-                                # No quantity for this ingredient
-                                ingredients.append(str(ing))
-                else:
-                    # No quantities available, just use ingredients as is
-                    ingredients = [str(ing) for ing in ingredients_data if ing and str(ing).strip()]
+                ingredients = [str(ing) for ing in ingredients_data if ing and str(ing).strip()]
             elif isinstance(ingredients_data, str):
-                if ingredients_data.strip().startswith("["):
-                    try:
-                        parsed = json.loads(ingredients_data)
-                        if isinstance(parsed, list):
-                            # Try to parse quantities too
-                            if isinstance(quantities_data, str) and quantities_data.strip().startswith("["):
-                                try:
-                                    parsed_quantities = json.loads(quantities_data)
-                                    if isinstance(parsed_quantities, list):
-                                        for i, ing in enumerate(parsed):
-                                            if ing and str(ing).strip():
-                                                if i < len(parsed_quantities) and parsed_quantities[i]:
-                                                    ingredients.append(f"{parsed_quantities[i]} {ing}")
-                                                else:
-                                                    ingredients.append(str(ing))
-                                    else:
-                                        ingredients = [str(ing) for ing in parsed if ing and str(ing).strip()]
-                                except Exception:
-                                    ingredients = [str(ing) for ing in parsed if ing and str(ing).strip()]
-                            else:
-                                ingredients = [str(ing) for ing in parsed if ing and str(ing).strip()]
-                    except Exception:
-                        if ingredients_data.strip():
-                            ingredients = [ingredients_data]
-                elif ingredients_data.strip():
-                    ingredients = [ingredients_data]
+                ingredients = [ingredients_data]
 
             # Process instructions
             instructions = []
@@ -473,15 +463,7 @@ def chat():
             if isinstance(instructions_data, list):
                 instructions = [str(inst) for inst in instructions_data if inst]
             elif isinstance(instructions_data, str):
-                try:
-                    parsed = json.loads(instructions_data)
-                    if isinstance(parsed, list):
-                        instructions = [str(inst) for inst in parsed if inst]
-                    else:
-                        instructions = [instructions_data]
-                except Exception:
-                    if instructions_data.strip():
-                        instructions = [instructions_data]
+                instructions = [instructions_data]
 
             # Process calories
             calories = recipe.get("Calories")
@@ -489,10 +471,9 @@ def chat():
             if calories is not None:
                 try:
                     calories_display = f"{float(calories):.0f}"
-                except Exception:
+                except:
                     calories_display = str(calories)
 
-            # Build recipe data object
             recipe_data = {
                 "id": str(recipe.get("RecipeId", "")),
                 "name": recipe.get("Name", "Unknown Recipe"),
@@ -500,9 +481,7 @@ def chat():
                 "calories": calories_display,
                 "rating": recipe.get("AggregatedRating"),
                 "reviews": recipe.get("ReviewCount"),
-                "url": (
-                    f"https://www.food.com/recipe/" f"{slugify(recipe.get('Name', ''))}-{recipe.get('RecipeId', '')}"
-                ),
+                "url": f"https://www.food.com/recipe/{slugify(recipe.get('Name', ''))}-{recipe.get('RecipeId', '')}",
                 "ingredients": ingredients,
                 "instructions": instructions,
                 "nutrition": {
@@ -523,267 +502,20 @@ def chat():
                     "Category": recipe.get("RecipeCategory", "N/A"),
                 },
             }
-
             recipes_data.append(recipe_data)
 
-        return jsonify(
-            {
-                "recipes": recipes_data,
-                "currentPage": page,
-                "totalPages": total_pages,
-                "totalResults": total_results,
-                "success": True,
-            }
-        )
+        return jsonify({
+            "recipes": recipes_data,
+            "currentPage": page,
+            "totalPages": total_pages,
+            "totalResults": total_results,
+            "success": True,
+            "searchType": "exact",
+            "detectedCuisine": detected_cuisine
+        })
 
-    except pymongo.errors.OperationFailure as e:
-        print(f"MongoDB OperationFailure: {e.details}")
-        error_message = str(e.details.get("errmsg", "Unknown MongoDB error"))
-
-        # If vector search times out, try a simpler text search fallback
-        if "time limit" in error_message.lower():
-            print("Vector search timed out, falling back to text search...")
-            try:
-                # Use text search as fallback
-                text_search_results = list(
-                    recipes_collection.find(
-                        {"$text": {"$search": user_message}},
-                        {
-                            "_id": 0,
-                            "RecipeId": 1,
-                            "Name": 1,
-                            "RecipeIngredientParts": 1,
-                            "RecipeIngredientQuantities": 1,
-                            "RecipeInstructions": 1,
-                            "Images": 1,
-                            "MainImage": 1,
-                            "Calories": 1,
-                            "AuthorName": 1,
-                            "DatePublished": 1,
-                            "RecipeServings": 1,
-                            "RecipeYield": 1,
-                            "PrepTime": 1,
-                            "RecipeCategory": 1,
-                            "FatContent": 1,
-                            "SaturatedFatContent": 1,
-                            "CholesterolContent": 1,
-                            "SodiumContent": 1,
-                            "CarbohydrateContent": 1,
-                            "FiberContent": 1,
-                            "SugarContent": 1,
-                            "ProteinContent": 1,
-                            "AggregatedRating": 1,
-                            "ReviewCount": 1,
-                            "score": {"$meta": "textScore"},
-                        },
-                    )
-                    .sort([("score", {"$meta": "textScore"})])
-                    .limit(30)
-                )
-
-                if text_search_results:
-                    # Sort text search results by image availability
-                    recipes_with_images = []
-                    recipes_without_images = []
-
-                    for recipe in text_search_results:
-                        # Check if recipe has a valid image
-                        has_image = False
-                        main_image = recipe.get("MainImage")
-                        images = recipe.get("Images", [])
-
-                        if (
-                            main_image
-                            and isinstance(main_image, str)
-                            and main_image.strip().startswith(("http://", "https://"))
-                        ):
-                            has_image = True
-                        elif images and isinstance(images, list) and len(images) > 0:
-                            if isinstance(images[0], str) and images[0].strip().startswith(("http://", "https://")):
-                                has_image = True
-
-                        if has_image:
-                            recipes_with_images.append(recipe)
-                        else:
-                            recipes_without_images.append(recipe)
-
-                    # Combine results with images first
-                    sorted_text_results = recipes_with_images + recipes_without_images
-
-                    # Process text search results the same way
-                    total_results = len(sorted_text_results)
-                    total_pages = max(1, min(3, math.ceil(total_results / per_page)))
-                    start_idx = (page - 1) * per_page
-                    end_idx = start_idx + per_page
-                    page_results = sorted_text_results[start_idx:end_idx]
-
-                    # Process results into JSON format (same as vector search)
-                    recipes_data = []
-                    for recipe in page_results:
-                        # Extract image URL
-                        image_url = None
-                        main_image = recipe.get("MainImage")
-                        images = recipe.get("Images", [])
-
-                        if (
-                            main_image
-                            and isinstance(main_image, str)
-                            and main_image.strip().startswith(("http://", "https://"))
-                        ):
-                            image_url = main_image.strip()
-                        elif images and isinstance(images, list) and len(images) > 0:
-                            if isinstance(images[0], str) and images[0].strip().startswith(("http://", "https://")):
-                                image_url = images[0].strip()
-
-                        # Process ingredients
-                        ingredients = []
-                        ingredients_data = recipe.get("RecipeIngredientParts")
-                        quantities_data = recipe.get("RecipeIngredientQuantities")
-
-                        if isinstance(ingredients_data, list):
-                            # If we have quantities, combine them with ingredients
-                            if isinstance(quantities_data, list):
-                                for i, ing in enumerate(ingredients_data):
-                                    if ing and str(ing).strip():
-                                        if i < len(quantities_data) and quantities_data[i]:
-                                            quantity = str(quantities_data[i]).strip()
-                                            # Skip NA, N/A, None, or similar non-quantity values
-                                            if quantity.upper() in ["NA", "N/A", "NONE", "NULL", ""]:
-                                                ingredients.append(str(ing))
-                                            else:
-                                                # Combine quantity with ingredient
-                                                ingredients.append(f"{quantity} {ing}")
-                                        else:
-                                            # No quantity for this ingredient
-                                            ingredients.append(str(ing))
-                            else:
-                                # No quantities available, just use ingredients as is
-                                ingredients = [str(ing) for ing in ingredients_data if ing and str(ing).strip()]
-                        elif isinstance(ingredients_data, str):
-                            if ingredients_data.strip().startswith("["):
-                                try:
-                                    parsed = json.loads(ingredients_data)
-                                    if isinstance(parsed, list):
-                                        # Try to parse quantities too
-                                        if isinstance(quantities_data, str) and quantities_data.strip().startswith("["):
-                                            try:
-                                                parsed_quantities = json.loads(quantities_data)
-                                                if isinstance(parsed_quantities, list):
-                                                    for i, ing in enumerate(parsed):
-                                                        if ing and str(ing).strip():
-                                                            if i < len(parsed_quantities) and parsed_quantities[i]:
-                                                                quantity = str(parsed_quantities[i]).strip()
-                                                                # Skip NA, N/A, None, or similar non-quantity values
-                                                                if quantity.upper() in [
-                                                                    "NA",
-                                                                    "N/A",
-                                                                    "NONE",
-                                                                    "NULL",
-                                                                    "",
-                                                                ]:
-                                                                    ingredients.append(str(ing))
-                                                                else:
-                                                                    # Combine quantity with ingredient
-                                                                    ingredients.append(f"{quantity} {ing}")
-                                                            else:
-                                                                ingredients.append(str(ing))
-                                                else:
-                                                    ingredients = [
-                                                        str(ing) for ing in parsed if ing and str(ing).strip()
-                                                    ]
-                                            except Exception:
-                                                ingredients = [str(ing) for ing in parsed if ing and str(ing).strip()]
-                                        else:
-                                            ingredients = [str(ing) for ing in parsed if ing and str(ing).strip()]
-                                except Exception:
-                                    if ingredients_data.strip():
-                                        ingredients = [ingredients_data]
-                            elif ingredients_data.strip():
-                                ingredients = [ingredients_data]
-
-                        # Process instructions
-                        instructions = []
-                        instructions_data = recipe.get("RecipeInstructions", [])
-                        if isinstance(instructions_data, list):
-                            instructions = [str(inst) for inst in instructions_data if inst]
-                        elif isinstance(instructions_data, str):
-                            try:
-                                parsed = json.loads(instructions_data)
-                                if isinstance(parsed, list):
-                                    instructions = [str(inst) for inst in parsed if inst]
-                                else:
-                                    instructions = [instructions_data]
-                            except Exception:
-                                if instructions_data.strip():
-                                    instructions = [instructions_data]
-
-                        # Process calories
-                        calories = recipe.get("Calories")
-                        calories_display = "N/A"
-                        if calories is not None:
-                            try:
-                                calories_display = f"{float(calories):.0f}"
-                            except Exception:
-                                calories_display = str(calories)
-
-                        # Build recipe data object
-                        recipe_data = {
-                            "id": str(recipe.get("RecipeId", "")),
-                            "name": recipe.get("Name", "Unknown Recipe"),
-                            "image": image_url,
-                            "calories": calories_display,
-                            "rating": recipe.get("AggregatedRating"),
-                            "reviews": recipe.get("ReviewCount"),
-                            "url": (
-                                f"https://www.food.com/recipe/"
-                                f"{slugify(recipe.get('Name', ''))}-{recipe.get('RecipeId', '')}"
-                            ),
-                            "ingredients": ingredients,
-                            "instructions": instructions,
-                            "nutrition": {
-                                "Fat": f"{recipe.get('FatContent', 'N/A')}g",
-                                "Saturated Fat": f"{recipe.get('SaturatedFatContent', 'N/A')}g",
-                                "Cholesterol": f"{recipe.get('CholesterolContent', 'N/A')}mg",
-                                "Sodium": f"{recipe.get('SodiumContent', 'N/A')}mg",
-                                "Carbohydrates": f"{recipe.get('CarbohydrateContent', 'N/A')}g",
-                                "Fiber": f"{recipe.get('FiberContent', 'N/A')}g",
-                                "Sugar": f"{recipe.get('SugarContent', 'N/A')}g",
-                                "Protein": f"{recipe.get('ProteinContent', 'N/A')}g",
-                            },
-                            "additionalInfo": {
-                                "Author": recipe.get("AuthorName", "N/A"),
-                                "Published": recipe.get("DatePublished", "N/A"),
-                                "Servings": recipe.get("RecipeServings", recipe.get("RecipeYield", "N/A")),
-                                "Prep Time": (
-                                    f"{recipe.get('PrepTime', 'N/A')} minutes" if recipe.get("PrepTime") else "N/A"
-                                ),
-                                "Category": recipe.get("RecipeCategory", "N/A"),
-                            },
-                        }
-
-                        recipes_data.append(recipe_data)
-
-                    return jsonify(
-                        {
-                            "recipes": recipes_data,
-                            "currentPage": page,
-                            "totalPages": total_pages,
-                            "totalResults": total_results,
-                            "success": True,
-                            "searchType": "text",  # Indicate fallback was used
-                        }
-                    )
-                else:
-                    return jsonify(
-                        {"recipes": [], "success": True, "currentPage": 1, "totalPages": 0, "totalResults": 0}
-                    )
-            except Exception as fallback_error:
-                print(f"Text search fallback also failed: {fallback_error}")
-                return jsonify({"error": "Search failed", "success": False}), 500
-        else:
-            return jsonify({"error": error_message, "success": False}), 500
     except Exception as e:
-        print(f"Error during vector search: {e}")
+        print(f"Error during search: {e}")
         return jsonify({"error": "Search failed", "success": False}), 500
 
 
@@ -927,6 +659,406 @@ def create_checkout_session():
     except Exception as e:
         return jsonify({'error': str(e)}), 403
 
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    event = None
+    payload = request.data
+    sig_header = request.headers.get('Stripe-Signature')
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, STRIPE_WEBHOOK_SECRET
+        )
+    except ValueError as e:
+        # Invalid payload
+        return jsonify({'error': str(e)}), 400
+    except stripe.error.SignatureVerificationError as e:
+        # Invalid signature
+        return jsonify({'error': str(e)}), 400
+
+    # Handle the event
+    if event.type == 'checkout.session.completed':
+        session = event.data.object
+        # Set up the customer for success
+        handle_checkout_session(session)
+    elif event.type == 'customer.subscription.updated':
+        subscription = event.data.object
+        handle_subscription_updated(subscription)
+    elif event.type == 'customer.subscription.deleted':
+        subscription = event.data.object
+        handle_subscription_deleted(subscription)
+    elif event.type == 'invoice.paid':
+        invoice = event.data.object
+        handle_invoice_paid(invoice)
+    elif event.type == 'invoice.payment_failed':
+        invoice = event.data.object
+        handle_invoice_failed(invoice)
+
+    return jsonify({'status': 'success'})
+
+def handle_checkout_session(session):
+    """Handle successful checkout session."""
+    customer_id = session.get('customer')
+    subscription_id = session.get('subscription')
+    
+    if not customer_id or not subscription_id:
+        logging.error("Missing customer_id or subscription_id in session")
+        return
+    
+    try:
+        # Get customer details
+        customer = stripe.Customer.retrieve(customer_id)
+        subscription = stripe.Subscription.retrieve(subscription_id)
+        
+        # Store subscription info in MongoDB
+        if db is not None:
+            subscriptions = db.subscriptions
+            subscriptions.update_one(
+                {'customer_id': customer_id},
+                {
+                    '$set': {
+                        'customer_id': customer_id,
+                        'subscription_id': subscription_id,
+                        'email': customer.email,
+                        'status': subscription.status,
+                        'current_period_end': datetime.fromtimestamp(subscription.current_period_end),
+                        'updated_at': datetime.utcnow()
+                    }
+                },
+                upsert=True
+            )
+    except Exception as e:
+        logging.error(f"Error handling checkout session: {str(e)}")
+
+def handle_subscription_updated(subscription):
+    """Handle subscription updates."""
+    customer_id = subscription.get('customer')
+    subscription_id = subscription.get('id')
+    
+    if not customer_id or not subscription_id:
+        logging.error("Missing customer_id or subscription_id in subscription update")
+        return
+        
+    try:
+        if db is not None:
+            subscriptions = db.subscriptions
+            subscriptions.update_one(
+                {'subscription_id': subscription_id},
+                {
+                    '$set': {
+                        'status': subscription.status,
+                        'current_period_end': datetime.fromtimestamp(subscription.current_period_end),
+                        'updated_at': datetime.utcnow()
+                    }
+                }
+            )
+    except Exception as e:
+        logging.error(f"Error handling subscription update: {str(e)}")
+
+def handle_subscription_deleted(subscription):
+    """Handle subscription cancellations."""
+    customer_id = subscription.get('customer')
+    subscription_id = subscription.get('id')
+    
+    if not customer_id or not subscription_id:
+        logging.error("Missing customer_id or subscription_id in subscription deletion")
+        return
+        
+    try:
+        if db is not None:
+            subscriptions = db.subscriptions
+            subscriptions.update_one(
+                {'subscription_id': subscription_id},
+                {
+                    '$set': {
+                        'status': 'canceled',
+                        'canceled_at': datetime.utcnow(),
+                        'updated_at': datetime.utcnow()
+                    }
+                }
+            )
+    except Exception as e:
+        logging.error(f"Error handling subscription deletion: {str(e)}")
+
+def handle_invoice_paid(invoice):
+    """Handle successful invoice payments."""
+    customer_id = invoice.get('customer')
+    subscription_id = invoice.get('subscription')
+    
+    if not customer_id or not subscription_id:
+        logging.error("Missing customer_id or subscription_id in invoice")
+        return
+        
+    try:
+        if db is not None:
+            # Update subscription payment status
+            subscriptions = db.subscriptions
+            subscriptions.update_one(
+                {'subscription_id': subscription_id},
+                {
+                    '$set': {
+                        'last_payment_status': 'paid',
+                        'last_payment_date': datetime.utcnow(),
+                        'updated_at': datetime.utcnow()
+                    }
+                }
+            )
+            
+            # Store invoice record
+            invoices = db.invoices
+            invoices.insert_one({
+                'invoice_id': invoice.id,
+                'customer_id': customer_id,
+                'subscription_id': subscription_id,
+                'amount_paid': invoice.amount_paid,
+                'status': invoice.status,
+                'created_at': datetime.fromtimestamp(invoice.created),
+                'payment_date': datetime.utcnow()
+            })
+    except Exception as e:
+        logging.error(f"Error handling invoice payment: {str(e)}")
+
+def handle_invoice_failed(invoice):
+    """Handle failed invoice payments."""
+    customer_id = invoice.get('customer')
+    subscription_id = invoice.get('subscription')
+    
+    if not customer_id or not subscription_id:
+        logging.error("Missing customer_id or subscription_id in failed invoice")
+        return
+        
+    try:
+        if db is not None:
+            # Update subscription payment status
+            subscriptions = db.subscriptions
+            subscriptions.update_one(
+                {'subscription_id': subscription_id},
+                {
+                    '$set': {
+                        'last_payment_status': 'failed',
+                        'last_payment_attempt': datetime.utcnow(),
+                        'updated_at': datetime.utcnow()
+                    }
+                }
+            )
+            
+            # Store failed invoice record
+            invoices = db.invoices
+            invoices.insert_one({
+                'invoice_id': invoice.id,
+                'customer_id': customer_id,
+                'subscription_id': subscription_id,
+                'amount_due': invoice.amount_due,
+                'status': invoice.status,
+                'created_at': datetime.fromtimestamp(invoice.created),
+                'failure_date': datetime.utcnow(),
+                'failure_reason': invoice.get('last_payment_error', {}).get('message', 'Unknown error')
+            })
+    except Exception as e:
+        logging.error(f"Error handling failed invoice: {str(e)}")
+
+@app.route("/search/cuisine", methods=["POST"])
+def cuisine_search():
+    data = request.get_json()
+    query = data.get("query", "").strip()
+    page = data.get("page", 1)
+    per_page = 12
+
+    if not query:
+        return jsonify({"error": "No query provided"}), 400
+
+    try:
+        recipes_collection = db[os.getenv("RECIPES_COLLECTION", "recipes")]
+        
+        # Define cuisine categories
+        cuisine_mapping = {
+            "indian": ["indian", "chole", "puri", "curry", "masala", "naan", "roti", "biryani", "samosa"],
+            "italian": ["italian", "pasta", "pizza", "risotto", "lasagna"],
+            "dessert": ["dessert", "ice cream", "cake", "pie", "cookie", "chocolate", "sweet"],
+            "chinese": ["chinese", "noodles", "fried rice", "dimsum", "spring roll"],
+            "mexican": ["mexican", "taco", "burrito", "enchilada", "quesadilla"],
+        }
+
+        # Detect cuisine from query
+        query_terms = query.lower().split()
+        detected_cuisine = None
+        for cuisine, terms in cuisine_mapping.items():
+            if any(term in query_terms for term in terms):
+                detected_cuisine = cuisine
+                break
+
+        if not detected_cuisine:
+            return jsonify({"error": "No cuisine type detected in query"}), 400
+
+        # Create search query
+        cuisine_terms = cuisine_mapping[detected_cuisine]
+        search_query = {
+            "$and": [
+                # Must match the cuisine type
+                {
+                    "$or": [
+                        {"RecipeCategory": {"$regex": f"\\b({'|'.join(cuisine_terms)})\\b", "$options": "i"}},
+                        {"Keywords": {"$regex": f"\\b({'|'.join(cuisine_terms)})\\b", "$options": "i"}},
+                        {"Name": {"$regex": f"\\b({'|'.join(cuisine_terms)})\\b", "$options": "i"}}
+                    ]
+                },
+                # Must match all search terms
+                *[{
+                    "$or": [
+                        {"Name": {"$regex": f"\\b{term}\\b", "$options": "i"}},
+                        {"RecipeCategory": {"$regex": f"\\b{term}\\b", "$options": "i"}},
+                        {"Keywords": {"$regex": f"\\b{term}\\b", "$options": "i"}},
+                        {"RecipeIngredientParts": {"$regex": f"\\b{term}\\b", "$options": "i"}}
+                    ]
+                } for term in query_terms]
+            ]
+        }
+
+        # Execute search
+        results = list(recipes_collection.find(
+            search_query,
+            {
+                "_id": 0,
+                "RecipeId": 1,
+                "Name": 1,
+                "Description": 1,
+                "RecipeIngredientParts": 1,
+                "RecipeIngredientQuantities": 1,
+                "RecipeInstructions": 1,
+                "Images": 1,
+                "MainImage": 1,
+                "Calories": 1,
+                "AuthorName": 1,
+                "DatePublished": 1,
+                "RecipeServings": 1,
+                "RecipeYield": 1,
+                "PrepTime": 1,
+                "RecipeCategory": 1,
+                "FatContent": 1,
+                "SaturatedFatContent": 1,
+                "CholesterolContent": 1,
+                "SodiumContent": 1,
+                "CarbohydrateContent": 1,
+                "FiberContent": 1,
+                "SugarContent": 1,
+                "ProteinContent": 1,
+                "AggregatedRating": 1,
+                "ReviewCount": 1,
+            }
+        ).limit(30))
+
+        # Process results
+        recipes_with_images = []
+        recipes_without_images = []
+
+        for recipe in results:
+            has_image = False
+            main_image = recipe.get("MainImage")
+            images = recipe.get("Images", [])
+
+            if main_image and isinstance(main_image, str) and main_image.strip().startswith(("http://", "https://")):
+                has_image = True
+            elif images and isinstance(images, list) and len(images) > 0:
+                if isinstance(images[0], str) and images[0].strip().startswith(("http://", "https://")):
+                    has_image = True
+
+            if has_image:
+                recipes_with_images.append(recipe)
+            else:
+                recipes_without_images.append(recipe)
+
+        # Combine results with images first
+        sorted_results = recipes_with_images + recipes_without_images
+        
+        # Calculate pagination
+        total_results = len(sorted_results)
+        total_pages = max(1, min(3, math.ceil(total_results / per_page)))
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        page_results = sorted_results[start_idx:end_idx]
+
+        # Format results
+        recipes_data = []
+        for recipe in page_results:
+            # Extract image URL
+            image_url = None
+            main_image = recipe.get("MainImage")
+            images = recipe.get("Images", [])
+
+            if main_image and isinstance(main_image, str) and main_image.strip().startswith(("http://", "https://")):
+                image_url = main_image.strip()
+            elif images and isinstance(images, list) and len(images) > 0:
+                if isinstance(images[0], str) and images[0].strip().startswith(("http://", "https://")):
+                    image_url = images[0].strip()
+
+            # Process ingredients
+            ingredients = []
+            ingredients_data = recipe.get("RecipeIngredientParts")
+            if isinstance(ingredients_data, list):
+                ingredients = [str(ing) for ing in ingredients_data if ing and str(ing).strip()]
+            elif isinstance(ingredients_data, str):
+                ingredients = [ingredients_data]
+
+            # Process instructions
+            instructions = []
+            instructions_data = recipe.get("RecipeInstructions", [])
+            if isinstance(instructions_data, list):
+                instructions = [str(inst) for inst in instructions_data if inst]
+            elif isinstance(instructions_data, str):
+                instructions = [instructions_data]
+
+            # Process calories
+            calories = recipe.get("Calories")
+            calories_display = "N/A"
+            if calories is not None:
+                try:
+                    calories_display = f"{float(calories):.0f}"
+                except:
+                    calories_display = str(calories)
+
+            recipe_data = {
+                "id": str(recipe.get("RecipeId", "")),
+                "name": recipe.get("Name", "Unknown Recipe"),
+                "image": image_url,
+                "calories": calories_display,
+                "rating": recipe.get("AggregatedRating"),
+                "reviews": recipe.get("ReviewCount"),
+                "url": f"https://www.food.com/recipe/{slugify(recipe.get('Name', ''))}-{recipe.get('RecipeId', '')}",
+                "ingredients": ingredients,
+                "instructions": instructions,
+                "nutrition": {
+                    "Fat": f"{recipe.get('FatContent', 'N/A')}g",
+                    "Saturated Fat": f"{recipe.get('SaturatedFatContent', 'N/A')}g",
+                    "Cholesterol": f"{recipe.get('CholesterolContent', 'N/A')}mg",
+                    "Sodium": f"{recipe.get('SodiumContent', 'N/A')}mg",
+                    "Carbohydrates": f"{recipe.get('CarbohydrateContent', 'N/A')}g",
+                    "Fiber": f"{recipe.get('FiberContent', 'N/A')}g",
+                    "Sugar": f"{recipe.get('SugarContent', 'N/A')}g",
+                    "Protein": f"{recipe.get('ProteinContent', 'N/A')}g",
+                },
+                "additionalInfo": {
+                    "Author": recipe.get("AuthorName", "N/A"),
+                    "Published": recipe.get("DatePublished", "N/A"),
+                    "Servings": recipe.get("RecipeServings", recipe.get("RecipeYield", "N/A")),
+                    "Prep Time": f"{recipe.get('PrepTime', 'N/A')} minutes" if recipe.get("PrepTime") else "N/A",
+                    "Category": recipe.get("RecipeCategory", "N/A"),
+                },
+            }
+            recipes_data.append(recipe_data)
+
+        return jsonify({
+            "recipes": recipes_data,
+            "currentPage": page,
+            "totalPages": total_pages,
+            "totalResults": total_results,
+            "success": True,
+            "cuisine": detected_cuisine
+        })
+
+    except Exception as e:
+        print(f"Error during cuisine search: {e}")
+        return jsonify({"error": "Search failed", "success": False}), 500
 
 # TODO: Future Unique Endpoints
 # @app.route('/cooking-mode/<recipe_id>', methods=['POST'])

@@ -32,7 +32,8 @@ import {
   Fab,
   Tooltip,
   Dialog,
-  DialogContent
+  DialogContent,
+  DialogTitle
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -54,6 +55,7 @@ import TrendingSearches from './components/TrendingSearches';
 import About from './components/About';
 import Privacy from './components/Privacy';
 import Tips from './components/Tips';
+import SubscriptionPage from './components/SubscriptionPage';
 
 function App() {
   const [darkMode, setDarkMode] = useState(true);
@@ -85,8 +87,8 @@ function App() {
       return 'https://tastory-api-vbx2teipca-uc.a.run.app';
     }
     
-    // Check if process.env exists and has our variable
-    if (typeof process !== 'undefined' && process.env && process.env.REACT_APP_API_URL) {
+    // Use environment variable if available
+    if (process.env.REACT_APP_API_URL) {
       return process.env.REACT_APP_API_URL;
     }
     
@@ -238,22 +240,7 @@ function App() {
       const data = await response.json();
       
       if (data.success && data.recipes) {
-        // Process the JSON response directly
-        const recipes = data.recipes.map((recipe) => ({
-          id: recipe.id,
-          name: recipe.name,
-          calories: recipe.calories,
-          image: recipe.image || '',
-          rating: recipe.rating || '0',
-          reviews: recipe.reviews || '0',
-          url: recipe.url || '',
-          ingredients: recipe.ingredients || [],
-          instructions: recipe.instructions || [],
-          nutrition: recipe.nutrition || {},
-          additionalInfo: recipe.additionalInfo || {}
-        }));
-        
-        setSearchResults(recipes);
+        setSearchResults(data.recipes);
         setTotalPages(data.totalPages || 1);
         setPage(data.currentPage || pageNum);
         
@@ -330,6 +317,49 @@ function App() {
     setDialogOpen(false);
   };
 
+  const renderDialogContent = () => {
+    let title = '';
+    let content = null;
+
+    switch (dialogContent) {
+      case 'about':
+        title = 'About Tastory';
+        content = <About />;
+        break;
+      case 'tips':
+        title = 'Tips & Tricks';
+        content = <Tips />;
+        break;
+      case 'privacy':
+        title = 'Privacy Policy';
+        content = <Privacy />;
+        break;
+      case 'subscribe':
+        title = 'Upgrade to Premium';
+        content = <SubscriptionPage />;
+        break;
+      default:
+        return null;
+    }
+
+    return (
+      <>
+        <DialogTitle sx={{ 
+          pb: 1, 
+          pt: 3,
+          px: 3,
+          fontWeight: 600,
+          color: 'primary.main'
+        }}>
+          {title}
+        </DialogTitle>
+        <DialogContent sx={{ px: 3, pb: 3 }}>
+          {content}
+        </DialogContent>
+      </>
+    );
+  };
+
   return (
     <ErrorBoundary>
       <ThemeProvider theme={theme}>
@@ -355,6 +385,22 @@ function App() {
                 >
                   About
                 </Typography>
+                {/* Hide upgrade button for now */}
+                {/* <Typography
+                  component="button"
+                  onClick={() => handleNavClick('subscribe')}
+                  sx={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'primary.main',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    '&:hover': { color: 'primary.dark' },
+                    transition: 'color 0.2s'
+                  }}
+                >
+                  Upgrade
+                </Typography> */}
                 <Typography
                   component="button"
                   onClick={() => handleNavClick('tips')}
@@ -769,28 +815,36 @@ function App() {
             browserLang={browserLang}
           />
 
-          {/* Navigation Dialog */}
+          {/* Dialog for About, Tips, Privacy, and Subscribe */}
           <Dialog
             open={dialogOpen}
             onClose={handleDialogClose}
             maxWidth="md"
             fullWidth
+            sx={{
+              '& .MuiDialog-paper': {
+                borderRadius: 3,
+                m: 2,
+              }
+            }}
           >
-            <DialogContent>
-              <IconButton
-                onClick={handleDialogClose}
-                sx={{
-                  position: 'absolute',
-                  right: 8,
-                  top: 8,
-                }}
-              >
-                <CloseIcon />
-              </IconButton>
-              {dialogContent === 'about' && <About />}
-              {dialogContent === 'privacy' && <Privacy />}
-              {dialogContent === 'tips' && <Tips />}
-            </DialogContent>
+            <IconButton
+              onClick={handleDialogClose}
+              sx={{
+                position: 'absolute',
+                right: 8,
+                top: 8,
+                color: 'text.secondary',
+                bgcolor: 'background.paper',
+                '&:hover': {
+                  bgcolor: 'action.hover',
+                },
+                zIndex: 1,
+              }}
+            >
+              <CloseIcon />
+            </IconButton>
+            {renderDialogContent()}
           </Dialog>
         </Box>
       </ThemeProvider>
