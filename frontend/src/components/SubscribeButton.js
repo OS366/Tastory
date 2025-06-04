@@ -4,24 +4,44 @@ import { Button, CircularProgress } from '@mui/material';
 import { Star as StarIcon } from '@mui/icons-material';
 
 // Initialize Stripe
-const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLIC_KEY);
+const initializeStripe = () => {
+  const key = process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY;
+  if (!key) {
+    console.error('Stripe publishable key is not set. Please check your environment variables.');
+    return null;
+  }
+  return loadStripe(key);
+};
+
+const stripePromise = initializeStripe();
 
 const SubscribeButton = () => {
   const [loading, setLoading] = useState(false);
 
   const handleSubscribe = async () => {
+    if (!stripePromise) {
+      alert('Stripe is not properly configured. Please contact support.');
+      return;
+    }
+
     setLoading(true);
     try {
       const stripe = await stripePromise;
-      if (!stripe) throw new Error('Stripe failed to initialize');
+      if (!stripe) {
+        throw new Error('Stripe failed to initialize. Please check your publishable key.');
+      }
 
       // Get Checkout Session ID from the server
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/create-checkout-session`, {
+      const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5001'}/create-checkout-session`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
       });
+
+      if (!response.ok) {
+        throw new Error('Failed to create checkout session');
+      }
 
       const session = await response.json();
       if (session.error) throw new Error(session.error);
@@ -36,7 +56,7 @@ const SubscribeButton = () => {
       }
     } catch (error) {
       console.error('Error:', error);
-      alert('Failed to initialize checkout. Please try again.');
+      alert('Failed to initialize checkout: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -47,7 +67,7 @@ const SubscribeButton = () => {
       variant="contained"
       color="primary"
       onClick={handleSubscribe}
-      disabled={loading}
+      disabled={loading || !stripePromise}
       startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <StarIcon />}
       sx={{
         background: 'linear-gradient(45deg, #FFB300 30%, #FFA000 90%)',
@@ -66,9 +86,13 @@ const SubscribeButton = () => {
         '&:active': {
           transform: 'translateY(0)',
         },
+        '&.Mui-disabled': {
+          background: 'linear-gradient(45deg, #ccc 30%, #999 90%)',
+          color: '#666',
+        }
       }}
     >
-      {loading ? 'Processing...' : 'Subscribe - $5/month'}
+      {loading ? 'Processing...' : (!stripePromise ? 'Payment Not Available' : 'Subscribe - $5/month')}
     </Button>
   );
 };

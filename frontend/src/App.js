@@ -32,7 +32,8 @@ import {
   Fab,
   Tooltip,
   Dialog,
-  DialogContent
+  DialogContent,
+  DialogTitle
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -86,8 +87,8 @@ function App() {
       return 'https://tastory-api-vbx2teipca-uc.a.run.app';
     }
     
-    // Check if process.env exists and has our variable
-    if (typeof process !== 'undefined' && process.env && process.env.REACT_APP_API_URL) {
+    // Use environment variable if available
+    if (process.env.REACT_APP_API_URL) {
       return process.env.REACT_APP_API_URL;
     }
     
@@ -239,22 +240,7 @@ function App() {
       const data = await response.json();
       
       if (data.success && data.recipes) {
-        // Process the JSON response directly
-        const recipes = data.recipes.map((recipe) => ({
-          id: recipe.id,
-          name: recipe.name,
-          calories: recipe.calories,
-          image: recipe.image || '',
-          rating: recipe.rating || '0',
-          reviews: recipe.reviews || '0',
-          url: recipe.url || '',
-          ingredients: recipe.ingredients || [],
-          instructions: recipe.instructions || [],
-          nutrition: recipe.nutrition || {},
-          additionalInfo: recipe.additionalInfo || {}
-        }));
-        
-        setSearchResults(recipes);
+        setSearchResults(data.recipes);
         setTotalPages(data.totalPages || 1);
         setPage(data.currentPage || pageNum);
         
@@ -332,18 +318,46 @@ function App() {
   };
 
   const renderDialogContent = () => {
+    let title = '';
+    let content = null;
+
     switch (dialogContent) {
       case 'about':
-        return <About />;
+        title = 'About Tastory';
+        content = <About />;
+        break;
       case 'tips':
-        return <Tips />;
+        title = 'Tips & Tricks';
+        content = <Tips />;
+        break;
       case 'privacy':
-        return <Privacy />;
+        title = 'Privacy Policy';
+        content = <Privacy />;
+        break;
       case 'subscribe':
-        return <SubscriptionPage />;
+        title = 'Upgrade to Premium';
+        content = <SubscriptionPage />;
+        break;
       default:
         return null;
     }
+
+    return (
+      <>
+        <DialogTitle sx={{ 
+          pb: 1, 
+          pt: 3,
+          px: 3,
+          fontWeight: 600,
+          color: 'primary.main'
+        }}>
+          {title}
+        </DialogTitle>
+        <DialogContent sx={{ px: 3, pb: 3 }}>
+          {content}
+        </DialogContent>
+      </>
+    );
   };
 
   return (
@@ -371,7 +385,8 @@ function App() {
                 >
                   About
                 </Typography>
-                <Typography
+                {/* Hide upgrade button for now */}
+                {/* <Typography
                   component="button"
                   onClick={() => handleNavClick('subscribe')}
                   sx={{
@@ -385,7 +400,7 @@ function App() {
                   }}
                 >
                   Upgrade
-                </Typography>
+                </Typography> */}
                 <Typography
                   component="button"
                   onClick={() => handleNavClick('tips')}
@@ -813,9 +828,23 @@ function App() {
               }
             }}
           >
-            <DialogContent sx={{ p: 0 }}>
-              {renderDialogContent()}
-            </DialogContent>
+            <IconButton
+              onClick={handleDialogClose}
+              sx={{
+                position: 'absolute',
+                right: 8,
+                top: 8,
+                color: 'text.secondary',
+                bgcolor: 'background.paper',
+                '&:hover': {
+                  bgcolor: 'action.hover',
+                },
+                zIndex: 1,
+              }}
+            >
+              <CloseIcon />
+            </IconButton>
+            {renderDialogContent()}
           </Dialog>
         </Box>
       </ThemeProvider>
