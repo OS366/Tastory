@@ -1,0 +1,119 @@
+[
+  {
+    "recipe_id": 68,
+    "name": "Chicago Style Pizza",
+    "category": "[\"Weeknight\"]",
+    "extracted_keywords": [
+      "chicago",
+      "style",
+      "pizza",
+      "weeknight"
+    ],
+    "top_search_term": "chicago"
+  },
+  {
+    "recipe_id": 141,
+    "name": "Carrie's Pizza Rolls",
+    "category": "[\"Low Cholesterol\"]",
+    "extracted_keywords": [
+      "carrie",
+      "pizza",
+      "rolls"
+    ],
+    "top_search_term": "carrie"
+  },
+  {
+    "recipe_id": 161,
+    "name": "Chicken in Pizza Dough",
+    "category": "[\"Chicken Breast\"]",
+    "extracted_keywords": [
+      "chicken",
+      "pizza",
+      "dough"
+    ],
+    "top_search_term": "chicken"
+  },
+  {
+    "recipe_id": 218,
+    "name": "Chocolate Chip Cookie Pizza",
+    "category": "[\"Dessert\"]",
+    "extracted_keywords": [
+      "chocolate",
+      "chip",
+      "cookie",
+      "pizza",
+      "dessert"
+    ],
+    "top_search_term": "chocolate"
+  },
+  {
+    "recipe_id": 549,
+    "name": "Grilled Chicken & Veggie Pizza",
+    "category": "[\"Chicken Breast\"]",
+    "extracted_keywords": [
+      "grilled",
+      "chicken",
+      "veggie",
+      "pizza"
+    ],
+    "top_search_term": "grilled"
+  },
+  {
+    "recipe_id": 633,
+    "name": "Deep Dish Vegetable Pizza",
+    "category": "[\"Vegetable\"]",
+    "extracted_keywords": [
+      "deep",
+      "dish",
+      "vegetable",
+      "pizza"
+    ],
+    "top_search_term": "deep"
+  },
+  {
+    "recipe_id": 1003,
+    "name": "Pizza",
+    "category": "[\"European\"]",
+    "extracted_keywords": [
+      "pizza",
+      "european"
+    ],
+    "top_search_term": "pizza"
+  },
+  {
+    "recipe_id": 1008,
+    "name": "Pizza Loaf",
+    "category": "[\"< 15 Mins\"]",
+    "extracted_keywords": [
+      "pizza",
+      "loaf"
+    ],
+    "top_search_term": "pizza"
+  },
+  {
+    "recipe_id": 1313,
+    "name": "Apple and Ginger Dessert Pizza",
+    "category": "[\"Dessert\"]",
+    "extracted_keywords": [
+      "apple",
+      "and",
+      "ginger",
+      "dessert",
+      "pizza"
+    ],
+    "top_search_term": "apple"
+  },
+  {
+    "recipe_id": 2675,
+    "name": "Whole Wheat Pizza Dough & Pizza Sauce",
+    "category": "[\"Sauces\"]",
+    "extracted_keywords": [
+      "whole",
+      "wheat",
+      "pizza",
+      "dough",
+      "sauce"
+    ],
+    "top_search_term": "whole"
+  }
+]
