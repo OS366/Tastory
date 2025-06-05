@@ -95,6 +95,7 @@ jobs:
         run: |
           coverage html
           echo "Coverage report generated in htmlcov/"
+        continue-on-error: true # Don't fail if coverage HTML generation fails
 
       - name: Upload Coverage HTML Report
         if: matrix.python-version == '3.11'
@@ -103,6 +104,7 @@ jobs:
           name: coverage-report
           path: htmlcov/
           retention-days: 30
+        continue-on-error: true # Don't fail if upload fails
 
   # Smoke Tests (Critical functionality)
   smoke-tests:
@@ -125,7 +127,7 @@ jobs:
 
       - name: Run Smoke Tests
         run: |
-          pytest tests/ -v --tb=short -m "smoke" || echo "No smoke tests defined yet"
+          pytest tests/ -v --tb=short -m "smoke"
 
       - name: Test Core Functions
         run: |
@@ -305,6 +307,18 @@ jobs:
         with:
           name: coverage-report
           path: coverage-report/
+        continue-on-error: true # Don't fail if artifact doesn't exist
+
+      - name: Check if coverage report exists
+        id: coverage-check
+        run: |
+          if [ -d "coverage-report" ] && [ "$(ls -A coverage-report 2>/dev/null)" ]; then
+            echo "coverage-exists=true" >> $GITHUB_OUTPUT
+            echo "✅ Coverage report found"
+          else
+            echo "coverage-exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️  Coverage report not available"
+          fi
 
       - name: Generate Test Summary
         run: |
@@ -325,7 +339,11 @@ jobs:
           echo "- ✅ Security Scanning" >> test-summary.md
           echo "" >> test-summary.md
           echo "### Coverage" >> test-summary.md
-          echo "- 📊 Coverage report available in artifacts" >> test-summary.md
+          if [ "${{ steps.coverage-check.outputs.coverage-exists }}" == "true" ]; then
+            echo "- 📊 Coverage report available in artifacts" >> test-summary.md
+          else
+            echo "- ⚠️  Coverage report not generated (backend tests may have failed)" >> test-summary.md
+          fi
 
       - name: Upload Test Summary
         uses: actions/upload-artifact@v4
