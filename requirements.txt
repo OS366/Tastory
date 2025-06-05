@@ -6,4 +6,6 @@ sentence-transformers==2.2.2
 numpy==1.24.3
 stripe==7.8.0
 gunicorn==21.2.0
-Werkzeug==2.3.7 
+Werkzeug==2.3.7
+requests==2.31.0
+beautifulsoup4==4.12.2 

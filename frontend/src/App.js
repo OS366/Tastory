@@ -50,12 +50,114 @@ import {
   Stop as StopIcon,
   RestaurantMenu as RestaurantMenuIcon
 } from '@mui/icons-material';
+import {
+  Chart as ChartJS,
+  ArcElement,
+  Tooltip as ChartTooltip,
+  Legend,
+} from 'chart.js';
+import { Doughnut } from 'react-chartjs-2';
 import ErrorBoundary, { ErrorPage } from './ErrorBoundary';
 import TrendingSearches from './components/TrendingSearches';
 import About from './components/About';
 import Privacy from './components/Privacy';
 import Tips from './components/Tips';
 import SubscriptionPage from './components/SubscriptionPage';
+
+// Register Chart.js components
+ChartJS.register(ArcElement, ChartTooltip, Legend);
+
+// Helper function to process nutrition data for doughnut chart
+const processNutritionData = (nutrition) => {
+  if (!nutrition || Object.keys(nutrition).length === 0) {
+    return null;
+  }
+
+  // Extract macronutrient values and convert to numbers
+  const parseValue = (value) => {
+    if (!value || value === 'N/A') return 0;
+    return parseFloat(value.toString().replace(/[^\d.]/g, '')) || 0;
+  };
+
+  const carbs = parseValue(nutrition['Carbohydrates']);
+  const fat = parseValue(nutrition['Fat']);
+  const protein = parseValue(nutrition['Protein']);
+  const fiber = parseValue(nutrition['Fiber']);
+
+  // Calculate total macronutrients
+  const total = carbs + fat + protein;
+  
+  if (total === 0) return null;
+
+  // Calculate calories from macronutrients (approximate)
+  const carbCalories = carbs * 4;
+  const fatCalories = fat * 9;
+  const proteinCalories = protein * 4;
+  const totalCalories = carbCalories + fatCalories + proteinCalories;
+
+  return {
+    chartData: {
+      labels: ['Carbohydrates', 'Fat', 'Protein'],
+      datasets: [
+        {
+          data: [carbs, fat, protein],
+          backgroundColor: [
+            '#4CAF50', // Green for carbs
+            '#FF9800', // Orange for fat  
+            '#2196F3', // Blue for protein
+          ],
+          borderColor: [
+            '#388E3C',
+            '#F57C00', 
+            '#1976D2',
+          ],
+          borderWidth: 2,
+          hoverBackgroundColor: [
+            '#66BB6A',
+            '#FFB74D',
+            '#42A5F5',
+          ],
+        },
+      ],
+    },
+    chartOptions: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            padding: 20,
+            usePointStyle: true,
+            pointStyle: 'circle',
+            font: {
+              size: 12,
+              weight: 'bold'
+            }
+          }
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              const value = context.parsed;
+              const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+              return `${context.label}: ${value}g (${percentage}%)`;
+            }
+          }
+        }
+      },
+      cutout: '60%',
+    },
+    macros: {
+      carbs,
+      fat, 
+      protein,
+      fiber,
+      total,
+      calories: Math.round(totalCalories)
+    }
+  };
+};
 
 function App() {
   const [darkMode, setDarkMode] = useState(true);
@@ -76,6 +178,7 @@ function App() {
   const [backendError, setBackendError] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogContent, setDialogContent] = useState(null);
+  const [spellCorrection, setSpellCorrection] = useState(null);
 
   const prefersDarkMode = useMediaQuery('(prefers-color-scheme: dark)');
 
@@ -244,6 +347,15 @@ function App() {
         setTotalPages(data.totalPages || 1);
         setPage(data.currentPage || pageNum);
         
+        // Handle spell correction and suggestions
+        if (data.spellCorrection) {
+          setSpellCorrection(data.spellCorrection);
+        } else if (data.spellSuggestion) {
+          setSpellCorrection(data.spellSuggestion);
+        } else {
+          setSpellCorrection(null);
+        }
+        
         // Save to recent searches
         const updatedSearches = [query, ...recentSearches.filter(s => s !== query)].slice(0, 5);
         setRecentSearches(updatedSearches);
@@ -252,12 +364,14 @@ function App() {
         // Handle error or no results
         setSearchResults([]);
         setTotalPages(0);
+        setSpellCorrection(null);
         console.error('Search failed:', data.error);
       }
     } catch (error) {
       console.error('Search error:', error);
       setSearchResults([]);
       setTotalPages(0);
+      setSpellCorrection(null);
       setBackendError(error);
     } finally {
       setLoading(false);
@@ -749,7 +863,27 @@ function App() {
                   ) : (
                     // Search Results
                     <>
-                      {searchResults.length > 0 && (
+                      {/* Spell Correction Notice */}
+                      {spellCorrection && (
+                        <Box sx={{ 
+                          mb: 2, 
+                          p: 2, 
+                          backgroundColor: theme => theme.palette.mode === 'dark' ? 'rgba(255, 179, 0, 0.1)' : 'rgba(255, 179, 0, 0.1)',
+                          borderRadius: 2,
+                          border: '1px solid',
+                          borderColor: 'primary.main'
+                        }}>
+                          <Typography variant="body2" sx={{ color: 'text.primary' }}>
+                            {spellCorrection.message}. Did you mean "
+                            <strong style={{ color: '#FFB300' }}>{spellCorrection.correctedQuery}</strong>"?
+                          </Typography>
+                          <Typography variant="caption" sx={{ color: 'text.secondary', mt: 0.5, display: 'block' }}>
+                            Originally searched: "{spellCorrection.originalQuery}"
+                          </Typography>
+                        </Box>
+                      )}
+                      
+                      {searchResults.length > 0 && searchQuery.trim() && (
                         <Box sx={{ mb: 3, color: 'text.secondary' }}>
                           <Typography variant="body2">
                             About {totalPages * 12} results found for "<strong>{searchQuery}</strong>" in 0.{Math.floor(Math.random() * 9) + 1}s
@@ -813,6 +947,7 @@ function App() {
             drawerContent={drawerContent}
             setDrawerContent={setDrawerContent}
             browserLang={browserLang}
+            apiUrl={API_URL}
           />
 
           {/* Dialog for About, Tips, Privacy, and Subscribe */}
@@ -856,7 +991,7 @@ function App() {
 function RecipeCard({ recipe, isFavorite, onToggleFavorite, onOpenDetails }) {
   return (
     <Card sx={{ 
-      height: 360, // Slightly reduced height for better fit
+      height: 380, // Increased height to ensure reviews section is visible
       width: '100%',
       display: 'flex', 
       flexDirection: 'column',
@@ -923,6 +1058,31 @@ function RecipeCard({ recipe, isFavorite, onToggleFavorite, onOpenDetails }) {
             </Box>
           </Box>
         )}
+        
+        {/* Heart Icon - Top Right Overlay */}
+        <IconButton 
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleFavorite();
+          }}
+          sx={{
+            position: 'absolute',
+            top: 8,
+            right: 8,
+            backgroundColor: 'rgba(255, 255, 255, 0.9)',
+            color: isFavorite ? 'error.main' : 'grey.600',
+            '&:hover': {
+              backgroundColor: 'rgba(255, 255, 255, 1)',
+              transform: 'scale(1.1)',
+            },
+            transition: 'all 0.2s ease',
+            backdropFilter: 'blur(4px)',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+          }}
+          size="small"
+        >
+          {isFavorite ? <FavoriteIcon fontSize="small" /> : <FavoriteBorderIcon fontSize="small" />}
+        </IconButton>
       </Box>
       
       <CardContent sx={{ 
@@ -950,42 +1110,107 @@ function RecipeCard({ recipe, isFavorite, onToggleFavorite, onOpenDetails }) {
           {recipe.name}
         </Typography>
         
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5, fontSize: '0.8rem' }}>
-          Calories: {recipe.calories}
-        </Typography>
-        
-        <Box sx={{ mt: 'auto', display: 'flex', alignItems: 'center' }}>
-          <Rating 
-            value={parseFloat(recipe.rating) || 0} 
-            readOnly 
+        {/* Info Icon - Centered */}
+        <Box sx={{ display: 'flex', justifyContent: 'center', mb: 0.5 }}>
+          <IconButton 
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenDetails();
+            }}
             size="small"
-            sx={{ color: 'primary.main', fontSize: '1rem' }}
-          />
-          <Typography variant="caption" sx={{ ml: 0.5, fontSize: '0.7rem' }}>
-            ({recipe.reviews} reviews)
+            sx={{
+              color: 'primary.main',
+              '&:hover': {
+                backgroundColor: 'primary.light',
+                color: 'primary.dark',
+                transform: 'scale(1.1)',
+              },
+              transition: 'all 0.2s ease',
+            }}
+          >
+            <InfoIcon fontSize="small" />
+          </IconButton>
+        </Box>
+        
+        {recipe.walkMeter ? (
+          <Box sx={{ mb: 0.5 }}>
+            <Typography variant="body2" sx={{ fontSize: '0.8rem', fontWeight: 'bold', color: 'primary.main' }}>
+              {recipe.walkMeter.emoji} {recipe.walkMeter.distance}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+              {recipe.walkMeter.message}
+            </Typography>
+          </Box>
+        ) : (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5, fontSize: '0.8rem' }}>
+            Calories: {recipe.calories}
           </Typography>
+        )}
+        
+        <Box sx={{ mt: 'auto' }}>
+          {/* Consolidated Review Section */}
+          {recipe.topReview ? (
+            <Box sx={{ 
+              mb: 1,
+              p: 1, 
+              borderRadius: 1, 
+              backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.50',
+              border: '1px solid',
+              borderColor: theme => theme.palette.mode === 'dark' ? 'grey.700' : 'grey.200'
+            }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Rating 
+                    value={recipe.topReview.rating} 
+                    readOnly 
+                    size="small"
+                    sx={{ fontSize: '0.8rem' }}
+                  />
+                  <Typography variant="caption" sx={{ ml: 0.5, fontSize: '0.65rem', color: 'text.secondary' }}>
+                    by {recipe.topReview.author}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.secondary' }}>
+                  {recipe.reviews} reviews
+                </Typography>
+              </Box>
+              <Typography 
+                variant="caption" 
+                sx={{ 
+                  fontSize: '0.7rem',
+                  lineHeight: 1.3,
+                  display: '-webkit-box',
+                  WebkitLineClamp: 1,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                  fontStyle: 'italic',
+                  color: 'text.secondary'
+                }}
+              >
+                "{recipe.topReview.text}"
+              </Typography>
+            </Box>
+          ) : (
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+              <Rating 
+                value={parseFloat(recipe.rating) || 0} 
+                readOnly 
+                size="small"
+                sx={{ color: 'primary.main', fontSize: '1rem' }}
+              />
+              <Typography variant="caption" sx={{ ml: 0.5, fontSize: '0.7rem' }}>
+                ({recipe.reviews} reviews)
+              </Typography>
+            </Box>
+          )}
         </Box>
       </CardContent>
-      
-      <CardActions sx={{ 
-        p: 0.5,
-        height: 44,
-        flexShrink: 0
-      }}>
-        <IconButton onClick={onToggleFavorite} color="error" size="small">
-          {isFavorite ? <FavoriteIcon fontSize="small" /> : <FavoriteBorderIcon fontSize="small" />}
-        </IconButton>
-        <Box sx={{ flexGrow: 1 }} />
-        <IconButton onClick={onOpenDetails} size="small">
-          <InfoIcon fontSize="small" />
-        </IconButton>
-      </CardActions>
     </Card>
   );
 }
 
 // Recipe Details Drawer Component
-function RecipeDrawer({ open, onClose, recipe, drawerContent, setDrawerContent, browserLang }) {
+function RecipeDrawer({ open, onClose, recipe, drawerContent, setDrawerContent, browserLang, apiUrl }) {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [currentUtterance, setCurrentUtterance] = useState(null);
   const [voicesLoaded, setVoicesLoaded] = useState(false);
@@ -1642,10 +1867,28 @@ function RecipeDrawer({ open, onClose, recipe, drawerContent, setDrawerContent, 
           </Fab>
           <Fab
             size="small"
+            color={drawerContent === 'calories' ? 'primary' : 'default'}
+            onClick={() => setDrawerContent('calories')}
+            title="Detailed Calorie Analysis"
+            sx={{ fontSize: '1.2rem' }}
+          >
+            🔥
+          </Fab>
+          <Fab
+            size="small"
             color={drawerContent === 'nutrition' ? 'primary' : 'default'}
             onClick={() => setDrawerContent('nutrition')}
           >
             <NutritionIcon />
+          </Fab>
+          <Fab
+            size="small"
+            color={drawerContent === 'reviews' ? 'primary' : 'default'}
+            onClick={() => setDrawerContent('reviews')}
+            title="Customer Reviews"
+            sx={{ fontSize: '1.2rem' }}
+          >
+            💬
           </Fab>
         </Box>
 
@@ -1677,6 +1920,62 @@ function RecipeDrawer({ open, onClose, recipe, drawerContent, setDrawerContent, 
             <Typography variant="h6" gutterBottom>
               {recipe.name}
             </Typography>
+            
+            {/* Prominent Calorie Display */}
+            {recipe.walkMeter ? (
+              <Box sx={{ 
+                mb: 2, 
+                p: 2, 
+                borderRadius: 2, 
+                backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.100',
+                border: '2px solid',
+                borderColor: 'primary.main'
+              }}>
+                <Typography variant="h6" sx={{ color: 'primary.main', fontWeight: 'bold', mb: 0.5 }}>
+                  🚶‍♀️ Walk Meter
+                </Typography>
+                <Typography variant="h4" sx={{ fontWeight: 'bold', color: 'primary.main', mb: 1 }}>
+                  {recipe.walkMeter.emoji} {recipe.walkMeter.distance}
+                </Typography>
+                <Typography variant="h6" sx={{ color: 'text.primary', mb: 1 }}>
+                  {recipe.walkMeter.message}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic', mb: 1 }}>
+                  {recipe.walkMeter.context}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Based on {recipe.calories} calories per serving
+                </Typography>
+              </Box>
+            ) : (
+              <Box sx={{ 
+                mb: 2, 
+                p: 2, 
+                borderRadius: 2, 
+                backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.100',
+                border: '2px solid',
+                borderColor: 'primary.main'
+              }}>
+                <Typography variant="h6" sx={{ color: 'primary.main', fontWeight: 'bold', mb: 0.5 }}>
+                  🔥 Calories per serving
+                </Typography>
+                <Typography variant="h4" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
+                  {recipe.calories}
+                </Typography>
+                {recipe.calorieSource && (
+                  <Typography variant="body2" color="text.secondary">
+                    Source: {recipe.calorieSource === 'database' ? 'Database' : 
+                            recipe.calorieSource === 'calculated' ? 'Calculated from ingredients' : 'Unknown'}
+                  </Typography>
+                )}
+                {recipe.calorieSource === 'calculated' && (
+                  <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                    Estimated based on ingredient analysis
+                  </Typography>
+                )}
+              </Box>
+            )}
+
             {recipe.additionalInfo && (
               <List dense>
                 {Object.entries(recipe.additionalInfo).map(([key, value]) => (
@@ -1742,22 +2041,389 @@ function RecipeDrawer({ open, onClose, recipe, drawerContent, setDrawerContent, 
             <Typography variant="h6" gutterBottom>
               Nutrition (per serving)
             </Typography>
+
             {recipe.nutrition && Object.keys(recipe.nutrition).length > 0 ? (
-              <List dense>
-                {Object.entries(recipe.nutrition).map(([nutrient, value]) => (
-                  <ListItem key={nutrient} disableGutters>
-                    <ListItemText
-                      primary={nutrient}
-                      secondary={value}
-                      primaryTypographyProps={{ fontWeight: 'medium' }}
-                    />
-                  </ListItem>
-                ))}
-              </List>
+              <Box>
+                {/* Macronutrient Doughnut Chart */}
+                {(() => {
+                  const chartData = processNutritionData(recipe.nutrition);
+                  return chartData ? (
+                    <Box sx={{ mb: 3 }}>
+                      <Typography variant="h6" sx={{ mb: 2, textAlign: 'center', color: 'primary.main' }}>
+                        📊 Macronutrient Breakdown
+                      </Typography>
+                      
+                      {/* Chart Container */}
+                      <Box sx={{ 
+                        height: 280, 
+                        mb: 2,
+                        p: 2,
+                        borderRadius: 2,
+                        backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
+                        border: '1px solid',
+                        borderColor: theme => theme.palette.mode === 'dark' ? 'grey.700' : 'grey.200'
+                      }}>
+                        <Doughnut data={chartData.chartData} options={chartData.chartOptions} />
+                      </Box>
+                      
+                      {/* Macronutrient Summary */}
+                      <Box sx={{ 
+                        display: 'grid', 
+                        gridTemplateColumns: 'repeat(2, 1fr)', 
+                        gap: 1,
+                        mb: 2,
+                        p: 2,
+                        borderRadius: 2,
+                        backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.100'
+                      }}>
+                        <Box sx={{ textAlign: 'center' }}>
+                          <Typography variant="body2" color="text.secondary">Carbs</Typography>
+                          <Typography variant="h6" sx={{ color: '#4CAF50', fontWeight: 'bold' }}>
+                            {chartData.macros.carbs}g
+                          </Typography>
+                        </Box>
+                        <Box sx={{ textAlign: 'center' }}>
+                          <Typography variant="body2" color="text.secondary">Fat</Typography>
+                          <Typography variant="h6" sx={{ color: '#FF9800', fontWeight: 'bold' }}>
+                            {chartData.macros.fat}g
+                          </Typography>
+                        </Box>
+                        <Box sx={{ textAlign: 'center' }}>
+                          <Typography variant="body2" color="text.secondary">Protein</Typography>
+                          <Typography variant="h6" sx={{ color: '#2196F3', fontWeight: 'bold' }}>
+                            {chartData.macros.protein}g
+                          </Typography>
+                        </Box>
+                        <Box sx={{ textAlign: 'center' }}>
+                          <Typography variant="body2" color="text.secondary">Fiber</Typography>
+                          <Typography variant="h6" sx={{ color: 'text.primary', fontWeight: 'bold' }}>
+                            {chartData.macros.fiber}g
+                          </Typography>
+                        </Box>
+                      </Box>
+
+                      {/* Estimated Calories from Macros */}
+                      <Box sx={{ 
+                        textAlign: 'center',
+                        p: 2,
+                        borderRadius: 2,
+                        backgroundColor: 'primary.main',
+                        color: 'primary.contrastText',
+                        mb: 3
+                      }}>
+                        <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                          Estimated calories from macronutrients
+                        </Typography>
+                        <Typography variant="h5" sx={{ fontWeight: 'bold' }}>
+                          ~{chartData.macros.calories} kcal
+                        </Typography>
+                      </Box>
+                    </Box>
+                  ) : null;
+                })()}
+
+                {/* Detailed Nutrition List */}
+                <Typography variant="h6" sx={{ mb: 1, color: 'text.primary' }}>
+                  Complete Nutrition Facts
+                </Typography>
+                <List dense>
+                  {Object.entries(recipe.nutrition).map(([nutrient, value]) => (
+                    <ListItem key={nutrient} disableGutters>
+                      <ListItemText
+                        primary={nutrient}
+                        secondary={value}
+                        primaryTypographyProps={{ fontWeight: 'medium' }}
+                        sx={{
+                          '& .MuiListItemText-primary': {
+                            fontSize: '0.95rem'
+                          }
+                        }}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              </Box>
             ) : (
               <Typography variant="body2" color="text.secondary">
-                No nutrition information available
+                No additional nutrition information available
               </Typography>
+            )}
+          </Box>
+        )}
+
+        {/* Add new calories content section */}
+        {drawerContent === 'calories' && (
+          <Box>
+            <Typography variant="h6" gutterBottom>
+              Detailed Calorie Analysis
+            </Typography>
+            
+            <Box sx={{ 
+              mb: 3, 
+              p: 2, 
+              borderRadius: 2, 
+              backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.100',
+              border: '2px solid',
+              borderColor: 'primary.main'
+            }}>
+              {recipe.walkMeter ? (
+                <>
+                  <Typography variant="h5" sx={{ color: 'primary.main', fontWeight: 'bold', mb: 2 }}>
+                    🚶‍♀️ Walk Meter: {recipe.walkMeter.distance}
+                  </Typography>
+                  <Typography variant="h6" sx={{ color: 'text.primary', mb: 1 }}>
+                    {recipe.walkMeter.emoji} {recipe.walkMeter.message}
+                  </Typography>
+                  <Typography variant="body1" color="text.secondary" sx={{ fontStyle: 'italic', mb: 2 }}>
+                    {recipe.walkMeter.context}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Based on {recipe.calories} calories per serving
+                  </Typography>
+                </>
+              ) : (
+                <Typography variant="h5" sx={{ color: 'primary.main', fontWeight: 'bold', mb: 2 }}>
+                  🔥 {recipe.calories} calories per serving
+                </Typography>
+              )}
+              
+              {recipe.additionalInfo?.Servings && (
+                <Typography variant="body1" sx={{ mb: 2 }}>
+                  Recipe serves: {recipe.additionalInfo.Servings} people
+                </Typography>
+              )}
+              
+              {/* Calorie source information */}
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="h6" sx={{ mb: 1 }}>
+                  Data Source:
+                </Typography>
+                {recipe.calorieSource === 'database' && (
+                  <Typography variant="body2" sx={{ color: 'success.main' }}>
+                    ✓ From recipe database - verified nutritional data
+                  </Typography>
+                )}
+                {recipe.calorieSource === 'calculated' && (
+                  <Typography variant="body2" sx={{ color: 'info.main' }}>
+                    📊 Calculated from ingredients using our nutritional database
+                  </Typography>
+                )}
+                {recipe.calorieSource === 'none' && (
+                  <Typography variant="body2" sx={{ color: 'warning.main' }}>
+                    ⚠️ No calorie information available
+                  </Typography>
+                )}
+              </Box>
+              
+              {/* Comparison if both values exist */}
+              {recipe.existingCalories && recipe.calculatedCalories && (
+                <Box sx={{ mt: 2, p: 2, backgroundColor: 'background.paper', borderRadius: 1 }}>
+                  <Typography variant="h6" sx={{ mb: 1 }}>
+                    Accuracy Check:
+                  </Typography>
+                  <Typography variant="body2">
+                    Database: {(recipe.existingCalories / (recipe.additionalInfo?.Servings || 1)).toFixed(0)} cal/serving
+                  </Typography>
+                  <Typography variant="body2">
+                    Calculated: {recipe.calculatedCalories.toFixed(0)} cal/serving
+                  </Typography>
+                  {(() => {
+                    const dbValue = recipe.existingCalories / (recipe.additionalInfo?.Servings || 1);
+                    const calcValue = recipe.calculatedCalories;
+                    const difference = Math.abs(dbValue - calcValue);
+                    const accuracy = dbValue > 0 ? (1 - difference / dbValue) * 100 : 0;
+                    
+                    if (difference < 25) {
+                      return (
+                        <Typography variant="body2" sx={{ color: 'success.main', fontWeight: 'bold', mt: 1 }}>
+                          ✓ Excellent accuracy ({accuracy.toFixed(1)}%)
+                        </Typography>
+                      );
+                    } else if (difference < 100) {
+                      return (
+                        <Typography variant="body2" sx={{ color: 'warning.main', fontWeight: 'bold', mt: 1 }}>
+                          ⚠️ Good accuracy ({accuracy.toFixed(1)}%)
+                        </Typography>
+                      );
+                    } else {
+                      return (
+                        <Typography variant="body2" sx={{ color: 'error.main', fontWeight: 'bold', mt: 1 }}>
+                          ❌ Large difference ({difference.toFixed(0)} calories)
+                        </Typography>
+                      );
+                    }
+                  })()}
+                </Box>
+              )}
+              
+              {/* Action button to get detailed breakdown */}
+              <Box sx={{ mt: 2 }}>
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  onClick={() => {
+                    fetch(`${apiUrl}/recipe/${recipe.id}/calories`)
+                      .then(response => response.json())
+                      .then(data => {
+                        console.log('Detailed calorie breakdown:', data);
+                        // Create a more user-friendly display
+                        let breakdown = `Recipe: ${data.recipe?.name}\n\n`;
+                        breakdown += `Calories per serving: ${data.calculatedCalories?.calories_per_serving || 'N/A'}\n`;
+                        breakdown += `Total recipe calories: ${data.calculatedCalories?.total_calories || 'N/A'}\n`;
+                        breakdown += `Servings: ${data.calculatedCalories?.servings || 'N/A'}\n\n`;
+                        
+                        if (data.calculatedCalories?.calculation_details) {
+                          breakdown += 'Ingredient Breakdown:\n';
+                          data.calculatedCalories.calculation_details.forEach(item => {
+                            breakdown += `• ${item.ingredient} (${item.quantity}): ${Math.round(item.calories)} cal\n`;
+                          });
+                        }
+                        
+                        if (data.accuracy) {
+                          breakdown += `\nAccuracy: ${data.accuracy}`;
+                        }
+                        
+                        alert(breakdown);
+                      })
+                      .catch(error => {
+                        console.error('Error fetching calorie details:', error);
+                        alert('Could not fetch detailed calorie breakdown. Please check if the API is running.');
+                      });
+                  }}
+                >
+                  Get Ingredient-by-Ingredient Breakdown
+                </Button>
+              </Box>
+            </Box>
+            
+            {/* Nutritional context */}
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="h6" sx={{ mb: 1 }}>
+                Nutritional Context:
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                • Average daily intake: 2000-2500 calories
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                • This recipe provides ~{((parseInt(recipe.calories) || 0) / 2000 * 100).toFixed(1)}% of daily calories
+              </Typography>
+              {parseInt(recipe.calories) < 300 && (
+                <Typography variant="body2" sx={{ color: 'success.main', mt: 1 }}>
+                  ✓ Low-calorie option
+                </Typography>
+              )}
+              {parseInt(recipe.calories) > 600 && (
+                <Typography variant="body2" sx={{ color: 'warning.main', mt: 1 }}>
+                  ⚠️ High-calorie dish - consider portion size
+                </Typography>
+              )}
+            </Box>
+          </Box>
+        )}
+
+        {/* Reviews section */}
+        {drawerContent === 'reviews' && (
+          <Box>
+            <Typography variant="h6" gutterBottom>
+              Customer Reviews
+            </Typography>
+            
+            {recipe.topReview ? (
+              <Box>
+                {/* Highlighted Top Review */}
+                <Box sx={{ 
+                  mb: 3, 
+                  p: 2, 
+                  borderRadius: 2, 
+                  backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.100',
+                  border: '2px solid',
+                  borderColor: 'primary.main'
+                }}>
+                  <Typography variant="h6" sx={{ color: 'primary.main', fontWeight: 'bold', mb: 1 }}>
+                    ⭐ Top-Rated Review
+                  </Typography>
+                  
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                    <Rating 
+                      value={recipe.topReview.rating} 
+                      readOnly 
+                      size="small"
+                      sx={{ color: 'primary.main' }}
+                    />
+                    <Typography variant="body2" sx={{ ml: 1, fontWeight: 'bold' }}>
+                      {recipe.topReview.rating}/5 stars
+                    </Typography>
+                  </Box>
+                  
+                  <Typography variant="body2" sx={{ mb: 1, fontStyle: 'italic' }}>
+                    "{recipe.topReview.text}"
+                  </Typography>
+                  
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="caption" color="text.secondary">
+                      by {recipe.topReview.author}
+                    </Typography>
+                    {recipe.topReview.date && (
+                      <Typography variant="caption" color="text.secondary">
+                        {recipe.topReview.date}
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
+                
+                {/* Review Summary */}
+                <Box sx={{ 
+                  mb: 2, 
+                  p: 2, 
+                  borderRadius: 2, 
+                  backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50'
+                }}>
+                  <Typography variant="h6" sx={{ mb: 1 }}>
+                    Review Summary
+                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                    <Rating 
+                      value={parseFloat(recipe.rating) || 0} 
+                      readOnly 
+                      size="small"
+                      sx={{ mr: 1 }}
+                    />
+                    <Typography variant="body2">
+                      {recipe.rating}/5 overall rating
+                    </Typography>
+                  </Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Based on {recipe.reviews} customer reviews
+                  </Typography>
+                </Box>
+                
+                {/* Call to Action */}
+                <Box sx={{ textAlign: 'center', mt: 2 }}>
+                  <Button
+                    variant="outlined"
+                    fullWidth
+                    onClick={() => window.open(recipe.url, '_blank')}
+                    sx={{ mb: 1 }}
+                  >
+                    View All Reviews on Food.com
+                  </Button>
+                  <Typography variant="caption" color="text.secondary">
+                    See what other customers are saying about this recipe
+                  </Typography>
+                </Box>
+              </Box>
+            ) : (
+              <Box sx={{ textAlign: 'center', py: 4 }}>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  No reviews available for this recipe yet
+                </Typography>
+                <Button
+                  variant="outlined"
+                  onClick={() => window.open(recipe.url, '_blank')}
+                >
+                  Be the First to Review on Food.com
+                </Button>
+              </Box>
             )}
           </Box>
         )}
