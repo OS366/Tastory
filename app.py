@@ -15,7 +15,14 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 # Import our nutritional database
-from nutritional_database import calculate_recipe_calories
+try:
+    from nutritional_database import calculate_recipe_calories
+    NUTRITIONAL_DB_AVAILABLE = True
+except ImportError:
+    print("Warning: nutritional_database module not available. Calorie calculation will be disabled.")
+    NUTRITIONAL_DB_AVAILABLE = False
+    def calculate_recipe_calories(*args, **kwargs):
+        return None
 
 app = Flask(__name__)
 CORS(app)
@@ -1107,7 +1114,13 @@ def recipe_calorie_details(recipe_id):
         servings = safe_get_servings(recipe)
         existing_calories = recipe.get("Calories")
 
-        calc_result = calculate_recipe_calories(ingredients_data, quantities_data, servings)
+        calc_result = None
+        try:
+            if NUTRITIONAL_DB_AVAILABLE:
+                calc_result = calculate_recipe_calories(ingredients_data, quantities_data, servings)
+        except Exception as e:
+            print(f"Error calculating calories for recipe {recipe_id}: {e}")
+            calc_result = None
 
         response = {
             "recipe": {"id": recipe_id, "name": recipe.get("Name"), "servings": servings},
