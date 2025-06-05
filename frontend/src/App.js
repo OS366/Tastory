@@ -179,6 +179,7 @@ function App() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogContent, setDialogContent] = useState(null);
   const [spellCorrection, setSpellCorrection] = useState(null);
+  const [appVersion, setAppVersion] = useState('Loading...');
 
   const prefersDarkMode = useMediaQuery('(prefers-color-scheme: dark)');
 
@@ -298,6 +299,26 @@ function App() {
       }
     };
   }, [suggestionTimer]);
+
+  // Fetch app version from backend
+  useEffect(() => {
+    const fetchVersion = async () => {
+      try {
+        const response = await fetch(`${API_URL}/`);
+        if (response.ok) {
+          const data = await response.json();
+          setAppVersion(data.version || 'Unknown');
+        } else {
+          setAppVersion('Unknown');
+        }
+      } catch (error) {
+        console.error('Error fetching version:', error);
+        setAppVersion('Unknown');
+      }
+    };
+
+    fetchVersion();
+  }, [API_URL]);
 
   // Fetch search suggestions
   const fetchSuggestions = async (query) => {
@@ -438,7 +459,7 @@ function App() {
     switch (dialogContent) {
       case 'about':
         title = 'About Tastory';
-        content = <About />;
+        content = <About version={appVersion} />;
         break;
       case 'tips':
         title = 'Tips & Tricks';
@@ -938,6 +959,24 @@ function App() {
               )}
             </Box>
           </Container>
+
+          {/* Footer */}
+          <Box
+            component="footer"
+            sx={{
+              mt: 'auto',
+              py: 2,
+              px: 3,
+              backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.100',
+              borderTop: '1px solid',
+              borderColor: theme => theme.palette.mode === 'dark' ? 'grey.700' : 'grey.300',
+              textAlign: 'center'
+            }}
+          >
+            <Typography variant="body2" color="text.secondary">
+              Tastory v{appVersion} • Built with ❤️ by David Labs
+            </Typography>
+          </Box>
 
           {/* Recipe Details Drawer */}
           <RecipeDrawer
