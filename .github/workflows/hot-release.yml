@@ -1,0 +1,220 @@
+name: 🔥 Hot Release - Deploy to GCP
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch: # Allow manual triggering for testing
+    inputs:
+      release_tag:
+        description: "Release tag to deploy (e.g., v1.0.0)"
+        required: true
+        type: string
+
+env:
+  PROJECT_ID: tastory-hackathon
+  SERVICE_NAME: tastory-api
+  REGION: us-central1
+
+jobs:
+  pre-flight-check:
+    name: 🚦 Pre-flight Release Check
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.get_tag.outputs.tag }}
+      is_prerelease: ${{ steps.check_release.outputs.prerelease }}
+
+    steps:
+      - name: Get release tag
+        id: get_tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.release_tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check release type
+        id: check_release
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          else
+            echo "prerelease=${{ github.event.release.prerelease }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Release summary
+        run: |
+          echo "🔥 HOT RELEASE DEPLOYMENT INITIATED"
+          echo "Release Tag: ${{ steps.get_tag.outputs.tag }}"
+          echo "Pre-release: ${{ steps.check_release.outputs.prerelease }}"
+          echo "Event: ${{ github.event_name }}"
+
+  run-tests:
+    name: 🧪 Quick Test Suite
+    runs-on: ubuntu-latest
+    needs: pre-flight-check
+
+    steps:
+      - name: Checkout release code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.pre-flight-check.outputs.release_tag }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run smoke tests
+        run: |
+          pytest tests/unit/test_smoke.py -v --tb=short
+          echo "✅ Smoke tests passed - ready for hot deployment"
+
+  deploy-backend:
+    name: 🚀 Deploy Backend to GCP Cloud Run
+    runs-on: ubuntu-latest
+    needs: [pre-flight-check, run-tests]
+
+    steps:
+      - name: Checkout release code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.pre-flight-check.outputs.release_tag }}
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GCR
+        run: |
+          gcloud auth configure-docker
+
+      - name: Build and push Docker image
+        run: |
+          # Use release tag for image versioning
+          RELEASE_TAG="${{ needs.pre-flight-check.outputs.release_tag }}"
+          docker build -t gcr.io/$PROJECT_ID/$SERVICE_NAME:$RELEASE_TAG .
+          docker build -t gcr.io/$PROJECT_ID/$SERVICE_NAME:latest .
+          docker push gcr.io/$PROJECT_ID/$SERVICE_NAME:$RELEASE_TAG
+          docker push gcr.io/$PROJECT_ID/$SERVICE_NAME:latest
+
+      - name: Deploy to Cloud Run
+        run: |
+          RELEASE_TAG="${{ needs.pre-flight-check.outputs.release_tag }}"
+          gcloud run deploy $SERVICE_NAME \
+            --image gcr.io/$PROJECT_ID/$SERVICE_NAME:$RELEASE_TAG \
+            --region $REGION \
+            --platform managed \
+            --allow-unauthenticated \
+            --set-env-vars MONGODB_URI="${{ secrets.MONGODB_URI }}" \
+            --memory 2Gi \
+            --min-instances 1 \
+            --max-instances 100 \
+            --tag release-$RELEASE_TAG
+
+      - name: Verify backend deployment
+        run: |
+          SERVICE_URL=$(gcloud run services describe $SERVICE_NAME --region $REGION --format 'value(status.url)')
+          echo "🔥 Backend deployed at: $SERVICE_URL"
+
+          # Test health endpoint
+          curl -f "$SERVICE_URL/" || exit 1
+          echo "✅ Backend health check passed"
+
+  deploy-frontend:
+    name: 🌐 Deploy Frontend to Firebase
+    runs-on: ubuntu-latest
+    needs: [pre-flight-check, deploy-backend]
+
+    steps:
+      - name: Checkout release code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.pre-flight-check.outputs.release_tag }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Build frontend for production
+        working-directory: ./frontend
+        run: npm run build
+        env:
+          REACT_APP_API_URL: https://tastory-api-vbx2teipca-uc.a.run.app
+          NODE_ENV: production
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: "${{ secrets.GITHUB_TOKEN }}"
+          firebaseServiceAccount: "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}"
+          channelId: live
+          projectId: tastory-hackathon
+          entryPoint: ./
+
+      - name: Verify frontend deployment
+        run: |
+          sleep 10  # Wait for Firebase propagation
+          curl -f https://tastory-hackathon.web.app || exit 1
+          echo "✅ Frontend health check passed"
+
+  post-deployment:
+    name: 🎉 Post-Deployment Actions
+    runs-on: ubuntu-latest
+    needs: [pre-flight-check, deploy-backend, deploy-frontend]
+    if: success()
+
+    steps:
+      - name: Hot Release Success Notification
+        run: |
+          RELEASE_TAG="${{ needs.pre-flight-check.outputs.release_tag }}"
+          IS_PRERELEASE="${{ needs.pre-flight-check.outputs.is_prerelease }}"
+
+          echo "🔥🎉 HOT RELEASE DEPLOYMENT COMPLETED SUCCESSFULLY! 🎉🔥"
+          echo ""
+          echo "📦 Release: $RELEASE_TAG"
+          echo "🏷️  Pre-release: $IS_PRERELEASE"
+          echo ""
+          echo "🌐 Live URLs:"
+          echo "   Frontend: https://tastory-hackathon.web.app"
+          echo "   Backend:  https://tastory-api-vbx2teipca-uc.a.run.app"
+          echo ""
+          echo "🚀 Your release is now live and serving users!"
+
+      - name: Update deployment status
+        run: |
+          echo "DEPLOYMENT_STATUS=success" >> $GITHUB_ENV
+          echo "DEPLOYED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_ENV
+
+  rollback-on-failure:
+    name: 🚨 Emergency Rollback
+    runs-on: ubuntu-latest
+    needs: [pre-flight-check, deploy-backend, deploy-frontend]
+    if: failure()
+
+    steps:
+      - name: Rollback notification
+        run: |
+          echo "🚨 HOT RELEASE DEPLOYMENT FAILED!"
+          echo "Release: ${{ needs.pre-flight-check.outputs.release_tag }}"
+          echo ""
+          echo "⚠️  Manual intervention may be required"
+          echo "🔄 Consider triggering rollback procedures"
+          echo ""
+          echo "📊 Check deployment logs for details"

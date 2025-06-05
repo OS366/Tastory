@@ -1,0 +1,19 @@
+# Global owners (if no other rule matches)
+* @OS366/core-team
+
+# Backend code
+/app.py @OS366/backend-team
+/data-scripts/ @OS366/backend-team
+/tests/ @OS366/backend-team
+
+# Frontend code
+/frontend/ @OS366/frontend-team
+
+# Infrastructure and CI/CD
+/.github/ @OS366/devops-team
+/scripts/ @OS366/devops-team
+Dockerfile* @OS366/devops-team
+*.yml @OS366/devops-team
+
+# Documentation
+/docs/ @OS366/core-team 

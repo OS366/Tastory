@@ -1,12 +1,16 @@
 import React from 'react';
 import { Box, Typography, Paper, Container, Link } from '@mui/material';
 
-function About() {
+function About({ version = 'Unknown' }) {
   return (
     <Container maxWidth="md">
       <Paper sx={{ p: 4, mt: 4 }}>
         <Typography variant="h4" component="h1" gutterBottom sx={{ color: '#FFB300', fontWeight: 700 }}>
           About Tastory
+        </Typography>
+        
+        <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary', fontStyle: 'italic' }}>
+          Version {version}
         </Typography>
         
         <Typography variant="body1" paragraph>

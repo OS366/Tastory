@@ -72,4 +72,4 @@ if [ $? -eq 0 ]; then
 else
     echo "❌ Failed to apply branch protection rules"
     echo "Please check your GitHub permissions and try again"
-fi 
+fi

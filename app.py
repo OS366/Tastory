@@ -473,6 +473,19 @@ def chat():
         end_idx = start_idx + per_page
         page_results = sorted_results[start_idx:end_idx]
 
+        # Update search log with results count
+        try:
+            session_id = request.headers.get("X-Session-ID", str(uuid.uuid4()))
+            # Update the log entry with results count
+            if db is not None:
+                db.search_logs.update_one(
+                    {"session_id": session_id, "query": user_message.lower().strip()},
+                    {"$set": {"results_count": total_results}},
+                    upsert=False,
+                )
+        except Exception as e:
+            print(f"Failed to update search log with results count: {e}")
+
         # Format results
         recipes_data = []
         for recipe in page_results:

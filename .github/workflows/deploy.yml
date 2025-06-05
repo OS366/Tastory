@@ -1,4 +1,8 @@
-name: Deploy to GCP (DISABLED)
+name: Deploy to GCP (DISABLED - Use hot-release.yml instead)
+
+# This workflow is DISABLED in favor of the hot-release.yml workflow
+# Hot Release workflow triggers on GitHub releases and provides better control
+# This file is kept for reference and emergency manual deployments
 
 on:
   # push:
@@ -15,7 +19,7 @@ jobs:
   deploy-backend:
     name: Deploy Backend to Cloud Run
     runs-on: ubuntu-latest
-    if: false  # Temporarily disabled
+    if: false # Temporarily disabled
 
     steps:
       - name: Checkout code
@@ -40,20 +44,29 @@ jobs:
 
       - name: Deploy to Cloud Run
         run: |
+          # First deploy without any env vars to clear secret references
           gcloud run deploy $SERVICE_NAME \
             --image gcr.io/$PROJECT_ID/$SERVICE_NAME:$GITHUB_SHA \
             --region $REGION \
             --platform managed \
             --allow-unauthenticated \
-            --set-env-vars MONGODB_URI="${{ secrets.MONGODB_URI }}" \
             --memory 2Gi \
             --min-instances 1 \
-            --max-instances 100
+            --max-instances 100 \
+            --clear-env-vars \
+            --clear-secrets
+
+          # Then update with the MongoDB URI as a plain env var
+          gcloud run services update $SERVICE_NAME \
+            --region $REGION \
+            --set-env-vars "MONGODB_URI=${{ secrets.MONGODB_URI }}"
 
       - name: Test deployment
         run: |
           SERVICE_URL=$(gcloud run services describe $SERVICE_NAME --region $REGION --format 'value(status.url)')
           echo "Service deployed at: $SERVICE_URL"
+          # Wait a bit for service to be ready
+          sleep 15
           curl -f "$SERVICE_URL/health" || exit 1
 
   deploy-frontend:
