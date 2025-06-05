@@ -1,22 +1,23 @@
-import pymongo
-from dotenv import load_dotenv
 import os
-from sentence_transformers import SentenceTransformer
-import numpy as np
-from tqdm import tqdm
 import time
 
+import numpy as np
+import pymongo
+from dotenv import load_dotenv
+from sentence_transformers import SentenceTransformer
+from tqdm import tqdm
+
 # --- Configuration ---
-MODEL_NAME = 'all-MiniLM-L6-v2'
+MODEL_NAME = "all-MiniLM-L6-v2"
 BATCH_SIZE = 100  # Number of documents to update in MongoDB at a time
 
 # --- Recipes Configuration ---
-RECIPE_EMBEDDING_FIELD = 'recipe_embedding_all_MiniLM_L6_v2'
-RECIPE_FIELDS_TO_EMBED = ['Name', 'Description', 'Keywords', 'RecipeIngredientParts', 'RecipeInstructions']
+RECIPE_EMBEDDING_FIELD = "recipe_embedding_all_MiniLM_L6_v2"
+RECIPE_FIELDS_TO_EMBED = ["Name", "Description", "Keywords", "RecipeIngredientParts", "RecipeInstructions"]
 
 # --- Reviews Configuration ---
-REVIEW_EMBEDDING_FIELD = 'review_embedding_all_MiniLM_L6_v2'
-REVIEW_FIELDS_TO_EMBED = ['Review'] # Primarily the review text itself
+REVIEW_EMBEDDING_FIELD = "review_embedding_all_MiniLM_L6_v2"
+REVIEW_FIELDS_TO_EMBED = ["Review"]  # Primarily the review text itself
 
 # --- Load Embedding Model ---
 e_model = None
@@ -28,11 +29,12 @@ except Exception as e:
     print(f"Error loading sentence-transformer model: {e}")
     exit()
 
+
 # --- MongoDB Connection Utility ---
 def get_mongodb_collection(collection_env_var, default_collection_name):
     load_dotenv()
-    mongodb_uri = os.getenv('MONGODB_URI')
-    db_name = os.getenv('DB_NAME', 'tastory')
+    mongodb_uri = os.getenv("MONGODB_URI")
+    db_name = os.getenv("DB_NAME", "tastory")
     # Use the provided environment variable for collection name, or default
     collection_name_to_use = os.getenv(collection_env_var, default_collection_name)
 
@@ -42,7 +44,7 @@ def get_mongodb_collection(collection_env_var, default_collection_name):
 
     try:
         client = pymongo.MongoClient(mongodb_uri)
-        client.admin.command('ping')
+        client.admin.command("ping")
         db = client[db_name]
         collection = db[collection_name_to_use]
         print(f"Successfully connected to MongoDB: {db_name}/{collection_name_to_use}")
@@ -50,6 +52,7 @@ def get_mongodb_collection(collection_env_var, default_collection_name):
     except Exception as e:
         print(f"Error connecting to MongoDB for {collection_name_to_use}: {e}")
         return None
+
 
 # --- Text Generation Functions ---
 def generate_text_for_recipe_embedding(recipe_doc):
@@ -63,6 +66,7 @@ def generate_text_for_recipe_embedding(recipe_doc):
                 texts_to_join.append(content)
     return " . ".join(texts_to_join).strip()
 
+
 def generate_text_for_review_embedding(review_doc):
     texts_to_join = []
     for field in REVIEW_FIELDS_TO_EMBED:
@@ -71,12 +75,10 @@ def generate_text_for_review_embedding(review_doc):
             texts_to_join.append(content)
     return " . ".join(texts_to_join).strip()
 
+
 # --- Generic Embedding Upload Function ---
 def process_collection_embeddings(
-    collection, 
-    embedding_field_name, 
-    text_generation_func, 
-    collection_desc # For tqdm description
+    collection, embedding_field_name, text_generation_func, collection_desc  # For tqdm description
 ):
     if e_model is None:
         print("Embedding model not loaded. Skipping collection.")
@@ -99,7 +101,7 @@ def process_collection_embeddings(
     start_time = time.time()
 
     for doc in tqdm(doc_cursor, total=total_docs_to_process, desc=f"Generating {collection_desc} Embeddings"):
-        doc_id = doc.get('_id')
+        doc_id = doc.get("_id")
         if not doc_id:
             print(f"Skipping {collection_desc} document with no _id.")
             continue
@@ -111,10 +113,8 @@ def process_collection_embeddings(
                 embedding_vector = e_model.encode(text_to_embed).tolist()
             except Exception as e:
                 print(f"Error encoding text for {collection_desc} _id {doc_id}: {e}")
-        
-        operations.append(
-            pymongo.UpdateOne({"_id": doc_id}, {"$set": {embedding_field_name: embedding_vector}})
-        )
+
+        operations.append(pymongo.UpdateOne({"_id": doc_id}, {"$set": {embedding_field_name: embedding_vector}}))
 
         if len(operations) >= BATCH_SIZE:
             try:
@@ -142,31 +142,29 @@ def process_collection_embeddings(
     print(f"\nVerifying a few {collection_desc} embeddings...")
     sample_embedded_docs = collection.find({embedding_field_name: {"$exists": True, "$ne": []}}).limit(3)
     for r_doc in sample_embedded_docs:
-        id_val = r_doc.get('RecipeId') if collection_desc == "Recipes" else r_doc.get('ReviewId', r_doc.get('_id'))
-        name_val = r_doc.get('Name') if collection_desc == "Recipes" else r_doc.get('Review', '')[:50] + '...'
-        print(f"{collection_desc[:-1]} ID: {id_val}, Preview: {name_val}, Embedding (first 3 dims): {r_doc.get(embedding_field_name, [])[:3]}...")
+        id_val = r_doc.get("RecipeId") if collection_desc == "Recipes" else r_doc.get("ReviewId", r_doc.get("_id"))
+        name_val = r_doc.get("Name") if collection_desc == "Recipes" else r_doc.get("Review", "")[:50] + "..."
+        print(
+            f"{collection_desc[:-1]} ID: {id_val}, Preview: {name_val}, Embedding (first 3 dims): {r_doc.get(embedding_field_name, [])[:3]}..."
+        )
+
 
 # --- Main Execution ---
 def main():
     # Process Recipes
-    recipes_collection = get_mongodb_collection('RECIPES_COLLECTION', 'recipes')
+    recipes_collection = get_mongodb_collection("RECIPES_COLLECTION", "recipes")
     process_collection_embeddings(
-        recipes_collection, 
-        RECIPE_EMBEDDING_FIELD, 
-        generate_text_for_recipe_embedding, 
-        "Recipes"
+        recipes_collection, RECIPE_EMBEDDING_FIELD, generate_text_for_recipe_embedding, "Recipes"
     )
 
-    print("\n" + "-"*50 + "\n") # Separator
+    print("\n" + "-" * 50 + "\n")  # Separator
 
     # Process Reviews
-    reviews_collection = get_mongodb_collection('REVIEWS_COLLECTION', 'reviews')
+    reviews_collection = get_mongodb_collection("REVIEWS_COLLECTION", "reviews")
     process_collection_embeddings(
-        reviews_collection, 
-        REVIEW_EMBEDDING_FIELD, 
-        generate_text_for_review_embedding,
-        "Reviews"
+        reviews_collection, REVIEW_EMBEDDING_FIELD, generate_text_for_review_embedding, "Reviews"
     )
 
+
 if __name__ == "__main__":
-    main() 
+    main()
