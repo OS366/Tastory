@@ -188,7 +188,7 @@ def extract_quantity_and_unit(quantity_str):
     # If no pattern matches, try to extract just the number
     try:
         return float(quantity_str), "piece"
-    except:
+    except (ValueError, TypeError):
         return 1.0, "piece"
 
 
@@ -245,13 +245,13 @@ def calculate_recipe_calories(ingredients_list, quantities_list, servings=1):
     if isinstance(ingredients_list, str):
         try:
             ingredients_list = json.loads(ingredients_list)
-        except:
+        except (json.JSONDecodeError, TypeError):
             return None
 
     if isinstance(quantities_list, str):
         try:
             quantities_list = json.loads(quantities_list)
-        except:
+        except (json.JSONDecodeError, TypeError):
             return None
 
     total_calories = 0

@@ -4,8 +4,6 @@ Test configuration and fixtures for Tastory application.
 
 import json
 import os
-
-# Import the Flask app and modules to test
 import sys
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch
@@ -13,10 +11,12 @@ from unittest.mock import Mock, patch
 import mongomock
 import pytest
 
+# Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app import app, calculate_walk_meter, estimate_serving_size, safe_get_servings, spell_correct_query
-from nutritional_database import calculate_recipe_calories
+# Import the Flask app and modules to test
+from app import app, calculate_walk_meter, estimate_serving_size, safe_get_servings, spell_correct_query  # noqa: E402
+from nutritional_database import calculate_recipe_calories  # noqa: E402
 
 
 @pytest.fixture(scope="session")
