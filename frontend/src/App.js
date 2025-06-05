@@ -964,7 +964,7 @@ function App() {
           <Box
             component="footer"
             sx={{
-              mt: 'auto',
+              mt: 4,
               py: 2,
               px: 3,
               backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.100',
