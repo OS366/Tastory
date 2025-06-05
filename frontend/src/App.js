@@ -976,6 +976,9 @@ function App() {
             <Typography variant="body2" color="text.secondary">
               Tastory v{appVersion} • Built with ❤️ by David Labs
             </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, fontStyle: 'italic', fontSize: '0.75rem' }}>
+              Think.Beyond.
+            </Typography>
           </Box>
 
           {/* Recipe Details Drawer */}
