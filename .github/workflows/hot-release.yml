@@ -110,6 +110,10 @@ jobs:
       - name: Deploy to Cloud Run
         run: |
           RELEASE_TAG="${{ needs.pre-flight-check.outputs.release_tag }}"
+          # Convert tag to valid Cloud Run format (remove v prefix, replace dots with hyphens)
+          CLOUD_RUN_TAG=$(echo $RELEASE_TAG | sed 's/^v//' | sed 's/\./-/g')
+          echo "Using Cloud Run tag: release-$CLOUD_RUN_TAG"
+
           gcloud run deploy $SERVICE_NAME \
             --image gcr.io/$PROJECT_ID/$SERVICE_NAME:$RELEASE_TAG \
             --region $REGION \
@@ -119,7 +123,7 @@ jobs:
             --memory 2Gi \
             --min-instances 1 \
             --max-instances 100 \
-            --tag release-$RELEASE_TAG
+            --tag release-$CLOUD_RUN_TAG
 
       - name: Verify backend deployment
         run: |
