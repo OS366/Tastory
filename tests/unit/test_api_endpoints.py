@@ -183,7 +183,7 @@ class TestCuisineSearchEndpoint:
     @pytest.mark.api
     def test_cuisine_search_no_cuisine_detected(self, test_app, populated_db):
         """Test cuisine search when no cuisine is detected."""
-        payload = {"query": "random food", "page": 1}
+        payload = {"query": "xyz123 abcdef", "page": 1}  # Nonsense query that won't match any cuisine
 
         response = test_app.post("/search/cuisine", data=json.dumps(payload), content_type="application/json")
 
@@ -330,15 +330,20 @@ class TestErrorHandling:
 
     @pytest.mark.api
     @patch("app.db", None)
-    def test_database_unavailable(self, test_app):
+    @patch("app.connect_to_mongodb")
+    def test_database_unavailable(self, mock_connect, test_app):
         """Test endpoints when database is unavailable."""
+        # Mock connection failure
+        mock_connect.return_value = (None, None)
+        
         payload = {"message": "test", "page": 1}
 
         response = test_app.post("/chat", data=json.dumps(payload), content_type="application/json")
 
         assert response.status_code == 500
         data = json.loads(response.data)
-        assert "error" in data
+        assert "reply" in data  # App returns "reply" field, not "error"
+        assert "Could not connect to the database" in data["reply"]
 
 
 class TestResponseFormat:

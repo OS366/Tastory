@@ -231,11 +231,26 @@ def sample_search_queries():
 
 @pytest.fixture(autouse=True)
 def reset_environment():
-    """Reset environment variables after each test."""
+    """Reset environment variables after each test but preserve test config."""
     original_env = os.environ.copy()
+    
+    # Set test configuration environment variables
+    test_env_vars = {
+        "TESTING": "True",
+        "DB_NAME": "tastory_test", 
+        "RECIPES_COLLECTION": "recipes_test",
+        "REVIEWS_COLLECTION": "reviews_test"
+    }
+    
+    # Apply test environment
+    os.environ.update(test_env_vars)
+    
     yield
+    
+    # Reset but preserve test config
     os.environ.clear()
     os.environ.update(original_env)
+    os.environ.update(test_env_vars)  # Keep test config active
 
 
 @pytest.fixture(scope="function")
