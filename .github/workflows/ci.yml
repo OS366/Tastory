@@ -31,13 +31,13 @@ jobs:
           pip install flake8 black isort pylint
 
       - name: Run Black formatter check
-        run: black --check app.py data-scripts/create_indexes.py
+        run: black --check . --exclude="/(venv|node_modules|\.git)/"
 
       - name: Run isort import checker
-        run: isort --check-only app.py data-scripts/create_indexes.py
+        run: isort --check-only . --skip venv --skip node_modules
 
       - name: Run Flake8 linter
-        run: flake8 app.py data-scripts/create_indexes.py --max-line-length=120 --ignore=E203,W503
+        run: flake8 . --max-line-length=120 --ignore=E203,W503 --exclude=venv,node_modules,.git
 
   # Comprehensive Backend Testing (must pass to continue)
   backend-test:

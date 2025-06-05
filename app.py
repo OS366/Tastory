@@ -1270,7 +1270,7 @@ def spell_correct_query(query):
     # Handle None and empty input
     if not query:
         return {"original": query or "", "corrected": "", "has_corrections": False}
-    
+
     # Split query into words
     words = query.lower().split()
     corrected_words = []

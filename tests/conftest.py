@@ -1,33 +1,38 @@
 """
 Test configuration and fixtures for Tastory application.
 """
-import os
-import pytest
+
 import json
-from unittest.mock import Mock, patch
-import mongomock
-from datetime import datetime, timedelta
+import os
 
 # Import the Flask app and modules to test
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from datetime import datetime, timedelta
+from unittest.mock import Mock, patch
 
-from app import app, spell_correct_query, calculate_walk_meter, estimate_serving_size, safe_get_servings
+import mongomock
+import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from app import app, calculate_walk_meter, estimate_serving_size, safe_get_servings, spell_correct_query
 from nutritional_database import calculate_recipe_calories
 
 
 @pytest.fixture(scope="session")
 def test_app():
     """Create application for testing."""
-    app.config.update({
-        "TESTING": True,
-        "WTF_CSRF_ENABLED": False,
-        "MONGODB_URI": "mongodb://test",
-        "DB_NAME": "tastory_test",
-        "RECIPES_COLLECTION": "recipes_test",
-        "REVIEWS_COLLECTION": "reviews_test"
-    })
-    
+    app.config.update(
+        {
+            "TESTING": True,
+            "WTF_CSRF_ENABLED": False,
+            "MONGODB_URI": "mongodb://test",
+            "DB_NAME": "tastory_test",
+            "RECIPES_COLLECTION": "recipes_test",
+            "REVIEWS_COLLECTION": "reviews_test",
+        }
+    )
+
     with app.test_client() as client:
         with app.app_context():
             yield client
@@ -38,9 +43,9 @@ def mock_db():
     """Create a mock MongoDB database for testing."""
     client = mongomock.MongoClient()
     db = client["tastory_test"]
-    
+
     # Mock the global db variable in app.py
-    with patch('app.db', db):
+    with patch("app.db", db):
         yield db
 
 
@@ -73,7 +78,7 @@ def sample_recipes():
             "CarbohydrateContent": 52.3,
             "FiberContent": 2.8,
             "SugarContent": 3.2,
-            "ProteinContent": 28.5
+            "ProteinContent": 28.5,
         },
         {
             "RecipeId": 2,
@@ -100,7 +105,7 @@ def sample_recipes():
             "CarbohydrateContent": 15.3,
             "FiberContent": 0.5,
             "SugarContent": 12.1,
-            "ProteinContent": 32.8
+            "ProteinContent": 32.8,
         },
         {
             "RecipeId": 3,
@@ -127,8 +132,8 @@ def sample_recipes():
             "CarbohydrateContent": 22.3,
             "FiberContent": 1.2,
             "SugarContent": 12.5,
-            "ProteinContent": 3.8
-        }
+            "ProteinContent": 3.8,
+        },
     ]
 
 
@@ -142,7 +147,7 @@ def sample_reviews():
             "Review": "Amazing biryani recipe! The flavors were incredible and my family loved it.",
             "AuthorName": "FoodLover123",
             "DateSubmitted": "2024-01-15T10:30:00Z",
-            "ReviewLength": 75
+            "ReviewLength": 75,
         },
         {
             "RecipeId": 1,
@@ -150,7 +155,7 @@ def sample_reviews():
             "Review": "Good recipe but took longer than expected.",
             "AuthorName": "QuickCook",
             "DateSubmitted": "2024-01-20T14:45:00Z",
-            "ReviewLength": 45
+            "ReviewLength": 45,
         },
         {
             "RecipeId": 2,
@@ -158,7 +163,7 @@ def sample_reviews():
             "Review": "Decent fondue but a bit too salty for my taste.",
             "AuthorName": "HealthyEater",
             "DateSubmitted": "2024-02-20T18:15:00Z",
-            "ReviewLength": 48
+            "ReviewLength": 48,
         },
         {
             "RecipeId": 3,
@@ -166,8 +171,8 @@ def sample_reviews():
             "Review": "Perfect cookies! Crispy outside, soft inside. Will make again!",
             "AuthorName": "BakingMom",
             "DateSubmitted": "2024-03-15T09:20:00Z",
-            "ReviewLength": 62
-        }
+            "ReviewLength": 62,
+        },
     ]
 
 
@@ -177,18 +182,18 @@ def populated_db(mock_db, sample_recipes, sample_reviews):
     # Insert test recipes
     recipes_collection = mock_db["recipes_test"]
     recipes_collection.insert_many(sample_recipes)
-    
+
     # Insert test reviews
     reviews_collection = mock_db["reviews_test"]
     reviews_collection.insert_many(sample_reviews)
-    
+
     return mock_db
 
 
 @pytest.fixture
 def mock_stripe():
     """Mock Stripe for payment testing."""
-    with patch('stripe.checkout.Session.create') as mock_create:
+    with patch("stripe.checkout.Session.create") as mock_create:
         mock_create.return_value = Mock(id="cs_test_123")
         yield mock_create
 
@@ -196,14 +201,14 @@ def mock_stripe():
 @pytest.fixture
 def mock_calculate_calories():
     """Mock calorie calculation for testing."""
-    with patch('app.calculate_recipe_calories') as mock_calc:
+    with patch("app.calculate_recipe_calories") as mock_calc:
         mock_calc.return_value = {
             "calories_per_serving": 112.5,
             "total_calories": 450,
             "ingredient_breakdown": [
                 {"ingredient": "rice", "calories": 200},
-                {"ingredient": "chicken", "calories": 250}
-            ]
+                {"ingredient": "chicken", "calories": 250},
+            ],
         }
         yield mock_calc
 
@@ -218,25 +223,9 @@ def test_session_id():
 def sample_search_queries():
     """Sample search queries for testing."""
     return {
-        "valid_queries": [
-            "chicken biryani",
-            "pizza",
-            "chocolate cookies",
-            "indian curry",
-            "pasta marinara"
-        ],
-        "typo_queries": [
-            "mali",
-            "chiken",
-            "spagetti",
-            "biriyani",
-            "tomatos"
-        ],
-        "empty_queries": [
-            "",
-            "   ",
-            None
-        ]
+        "valid_queries": ["chicken biryani", "pizza", "chocolate cookies", "indian curry", "pasta marinara"],
+        "typo_queries": ["mali", "chiken", "spagetti", "biriyani", "tomatos"],
+        "empty_queries": ["", "   ", None],
     }
 
 
@@ -253,6 +242,7 @@ def reset_environment():
 def capture_logs(caplog):
     """Capture application logs for testing."""
     import logging
+
     caplog.set_level(logging.INFO)
     return caplog
 
@@ -266,7 +256,7 @@ def recipe_with_no_servings():
         "Name": "Test Recipe No Servings",
         "RecipeServings": None,
         "RecipeYield": None,
-        "Calories": 300
+        "Calories": 300,
     }
 
 
@@ -278,7 +268,7 @@ def recipe_with_string_servings():
         "Name": "Test Recipe String Servings",
         "RecipeServings": "6",
         "RecipeYield": "serves 6",
-        "Calories": 600
+        "Calories": 600,
     }
 
 
@@ -290,11 +280,11 @@ def mock_trending_cache(mock_db):
         "trending": [
             {"query": "biryani", "count": 150, "score": 75.5, "trend": "up"},
             {"query": "pizza", "count": 120, "score": 60.0, "trend": "stable"},
-            {"query": "cookies", "count": 90, "score": 45.0, "trend": "up"}
+            {"query": "cookies", "count": 90, "score": 45.0, "trend": "up"},
         ],
-        "updated_at": datetime.utcnow() - timedelta(minutes=5)
+        "updated_at": datetime.utcnow() - timedelta(minutes=5),
     }
-    
+
     trending_collection = mock_db["trending_cache"]
     trending_collection.insert_one(cache_data)
-    return cache_data 
+    return cache_data
