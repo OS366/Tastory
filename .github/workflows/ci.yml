@@ -29,13 +29,13 @@ jobs:
           pip install flake8 black isort pylint
 
       - name: Run Black formatter check
-        run: black --check app.py create_indexes.py
+        run: black --check app.py data-scripts/create_indexes.py
 
       - name: Run isort import checker
-        run: isort --check-only app.py create_indexes.py
+        run: isort --check-only app.py data-scripts/create_indexes.py
 
       - name: Run Flake8 linter
-        run: flake8 app.py create_indexes.py --max-line-length=120 --ignore=E203,W503
+        run: flake8 app.py data-scripts/create_indexes.py --max-line-length=120 --ignore=E203,W503
 
   backend-test:
     name: Backend Tests
@@ -156,7 +156,7 @@ jobs:
           output: "trivy-results.sarif"
 
       - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         continue-on-error: true # Don't fail if SARIF upload fails
         with:
