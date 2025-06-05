@@ -31,4 +31,4 @@ ENV PORT=8080
 EXPOSE 8080
 
 # Use gunicorn with optimal settings for Cloud Run
-CMD ["gunicorn", "--bind", ":8080", "--workers", "1", "--threads", "8", "--timeout", "0", "--log-level", "info", "app:app"] 
+CMD ["sh", "-c", "exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 --log-level info app:app"]

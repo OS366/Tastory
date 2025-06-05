@@ -1,6 +1,7 @@
 """
 Basic tests for Tastory Flask application
 """
+
 import pytest
 
 
@@ -15,4 +16,4 @@ def test_placeholder():
 # - Test database connectivity
 # - Test embedding generation
 # - Test error handling
-# - Test CORS configuration 
+# - Test CORS configuration

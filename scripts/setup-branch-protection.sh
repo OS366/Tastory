@@ -1,83 +1,75 @@
 #!/bin/bash
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+# Script to set up branch protection rules for Tastory
+# This ensures pull requests cannot be merged if CI checks fail
+# Admins can override these rules when necessary
 
-echo -e "${YELLOW}Setting up branch protection rules for Tastory repository...${NC}"
+echo "🛡️  Setting up branch protection rules for Tastory..."
 
-# Function to set branch protection
-setup_branch_protection() {
-    local branch=$1
-    local required_reviews=$2
-    
-    echo -e "\n${YELLOW}Setting up protection rules for ${branch} branch...${NC}"
-    
-    # Create JSON payload for the API
-    json_payload=$(cat << EOF
+# Create temporary JSON file for branch protection configuration
+cat > /tmp/branch-protection.json << 'EOF'
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["test", "lint"]
+    "contexts": [
+      "✅ All Tests Passed - Ready for Merge",
+      "Backend Linting",
+      "Backend Tests", 
+      "Smoke Tests",
+      "Frontend Linting",
+      "Frontend Build & Test"
+    ]
   },
-  "enforce_admins": true,
+  "enforce_admins": false,
   "required_pull_request_reviews": {
-    "dismissal_restrictions": {},
+    "required_approving_review_count": 1,
     "dismiss_stale_reviews": true,
-    "require_code_owner_reviews": true,
-    "required_approving_review_count": $required_reviews
+    "require_code_owner_reviews": false,
+    "restrict_pushes": false
   },
   "restrictions": null,
-  "required_linear_history": true,
   "allow_force_pushes": false,
   "allow_deletions": false,
-  "required_conversation_resolution": true,
-  "lock_branch": false
+  "block_creations": false,
+  "required_conversation_resolution": true
 }
 EOF
-)
-    
-    # Create branch protection rule using the JSON payload
-    echo "$json_payload" | gh api \
-      --method PUT \
-      "/repos/OS366/Tastory/branches/$branch/protection" \
-      --input -
-      
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}Successfully set up protection rules for ${branch} branch${NC}"
-    else
-        echo -e "${RED}Failed to set up protection rules for ${branch} branch${NC}"
-        exit 1
-    fi
-}
 
-# Check if gh CLI is installed
-if ! command -v gh &> /dev/null; then
-    echo -e "${RED}GitHub CLI (gh) is not installed. Please install it first.${NC}"
-    exit 1
+# Apply branch protection rules
+echo "Applying branch protection to main branch..."
+gh api \
+  --method PUT \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  "/repos/:owner/:repo/branches/main/protection" \
+  --input /tmp/branch-protection.json
+
+# Clean up temporary file
+rm /tmp/branch-protection.json
+
+if [ $? -eq 0 ]; then
+    echo "✅ Branch protection rules applied successfully!"
+    echo ""
+    echo "🔒 Main branch protection settings:"
+    echo "   ✅ Require pull request reviews (1 approval minimum)"
+    echo "   ✅ Require all CI status checks to pass"
+    echo "   ✅ Require conversations to be resolved"
+    echo "   ✅ Dismiss stale reviews on new commits"
+    echo "   ⚠️  Admin override ENABLED (you can bypass rules)"
+    echo "   ❌ Force pushes blocked"
+    echo "   ❌ Branch deletions blocked"
+    echo ""
+    echo "📋 Required CI checks that must pass:"
+    echo "   • ✅ All Tests Passed - Ready for Merge"
+    echo "   • Backend Linting"
+    echo "   • Backend Tests (78 comprehensive tests)"
+    echo "   • Smoke Tests (critical functionality)"
+    echo "   • Frontend Linting"
+    echo "   • Frontend Build & Test"
+    echo ""
+    echo "🛡️  Pull requests will be BLOCKED unless all checks pass"
+    echo "👑 As admin, you can override and merge anyway if needed"
+else
+    echo "❌ Failed to apply branch protection rules"
+    echo "Please check your GitHub permissions and try again"
 fi
-
-# Check if logged in to GitHub
-if ! gh auth status &> /dev/null; then
-    echo -e "${RED}Not logged in to GitHub. Please run 'gh auth login' first.${NC}"
-    exit 1
-fi
-
-# Set up protection rules for each branch
-# main branch - requires 2 reviews
-setup_branch_protection "main" 2
-
-# stable branch - requires 2 reviews
-setup_branch_protection "stable" 2
-
-# development branch - requires 1 review
-setup_branch_protection "development" 1
-
-echo -e "\n${GREEN}Branch protection rules have been set up successfully!${NC}"
-echo -e "${YELLOW}Remember:${NC}"
-echo "- Feature branches should be merged into development via PR"
-echo "- Development should be merged into stable via PR"
-echo "- Stable should be merged into main via PR"
-echo "- All PRs require code review and passing CI checks" 

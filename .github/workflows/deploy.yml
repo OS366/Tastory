@@ -1,10 +1,14 @@
-name: Deploy to GCP
+name: Deploy to GCP (DISABLED - Use hot-release.yml instead)
+
+# This workflow is DISABLED in favor of the hot-release.yml workflow
+# Hot Release workflow triggers on GitHub releases and provides better control
+# This file is kept for reference and emergency manual deployments
 
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch: # Allow manual triggering
+  # push:
+  #   branches:
+  #     - main
+  workflow_dispatch: # Allow manual triggering only
 
 env:
   PROJECT_ID: tastory-hackathon
@@ -15,6 +19,7 @@ jobs:
   deploy-backend:
     name: Deploy Backend to Cloud Run
     runs-on: ubuntu-latest
+    if: false # Temporarily disabled
 
     steps:
       - name: Checkout code
