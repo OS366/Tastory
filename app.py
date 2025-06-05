@@ -1,19 +1,18 @@
-import datetime
 import json
 import logging
 import math
 import os
 import re
-import uuid
-import requests
 import urllib.parse
+import uuid
 from datetime import datetime, timedelta
 
 import pymongo
+import requests
+import stripe
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-import stripe
 
 # Import our nutritional database
 from nutritional_database import calculate_recipe_calories
@@ -637,7 +636,7 @@ def chat():
                     existing_per_serving = float(existing_calories) / servings
                     calories_display = f"{existing_per_serving:.0f}"
                     calorie_source = "database"
-                except:
+                except (ValueError, TypeError, ZeroDivisionError):
                     calories_display = "N/A"
                     calorie_source = "none"
 
@@ -1950,7 +1949,7 @@ def cuisine_search():
                     existing_per_serving = float(existing_calories) / servings
                     calories_display = f"{existing_per_serving:.0f}"
                     calorie_source = "database"
-                except:
+                except (ValueError, TypeError, ZeroDivisionError):
                     calories_display = "N/A"
                     calorie_source = "none"
 
@@ -2018,11 +2017,11 @@ def cuisine_search():
         if not has_corrections:
             alternative_suggestions = {"mali": "malai", "maali": "malai", "malae": "malai", "malay": "malai"}
 
-            query_lower = user_message.lower().strip()
+            query_lower = query.lower().strip()
             if query_lower in alternative_suggestions:
                 suggested_term = alternative_suggestions[query_lower]
                 response_data["spellSuggestion"] = {
-                    "originalQuery": user_message,
+                    "originalQuery": query,
                     "suggestedQuery": suggested_term,
                     "message": f"Did you mean '{suggested_term}'?",
                 }
