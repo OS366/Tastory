@@ -1,4 +1,7 @@
-name: CI/CD Pipeline with Test Automation
+name: CI/CD Pipeline with Test Automation (Regular Builds)
+
+# This workflow handles regular development builds and testing
+# For production releases, see hot-release.yml which deploys to GCP
 
 on:
   push: # Trigger on every push to any branch
