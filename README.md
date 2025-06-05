@@ -154,30 +154,9 @@ The open-source version is licensed under the GNU Affero General Public License 
 - Distribute the code
 - Must keep the source code open source if you distribute it
 
-### Commercial License
-
-For commercial use, we offer flexible licensing options:
-
-- Basic Commercial License
-- Professional License
-- Enterprise License
-
-Contact us at licensing@davidlabs.ca for:
-
-- Commercial licensing
-- Custom feature development
-- Enterprise support
-- White-label solutions
-
 ## Contributing
 
 We welcome contributions! Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting pull requests.
-
-## Support
-
-- Community Support: Open an issue on GitHub
-- Commercial Support: Contact support@davidlabs.ca
-- Enterprise Support: Contact enterprise@davidlabs.ca
 
 ## About
 
