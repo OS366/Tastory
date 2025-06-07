@@ -617,9 +617,43 @@ function App() {
               <Typography variant="h1" component="h1" sx={{ mb: 1, color: 'primary.main', fontWeight: 800 }}>
                 Tastory
               </Typography>
-              <Typography variant="h5" component="h2" sx={{ mb: 3, color: 'text.secondary', fontWeight: 300 }}>
+              <Typography variant="h5" component="h2" sx={{ mb: 2, color: 'text.secondary', fontWeight: 300 }}>
                 The Food Search Engine
               </Typography>
+
+              {/* v1.1.0 Release Announcement */}
+              <Box sx={{ mb: 4 }}>
+                <Chip 
+                  label="🎉 NEW v1.1.0: Universal Food Image System!" 
+                  color="primary"
+                  variant="filled"
+                  sx={{ 
+                    mb: 2,
+                    fontWeight: 600,
+                    fontSize: '0.9rem',
+                    px: 2,
+                    py: 0.5,
+                    background: 'linear-gradient(45deg, #FFB300 30%, #FFA000 90%)',
+                    color: '#000',
+                    boxShadow: '0 4px 12px rgba(255, 179, 0, 0.3)',
+                    animation: 'pulse 2s infinite',
+                    '@keyframes pulse': {
+                      '0%': {
+                        boxShadow: '0 4px 12px rgba(255, 179, 0, 0.3)',
+                      },
+                      '50%': {
+                        boxShadow: '0 4px 20px rgba(255, 179, 0, 0.5)',
+                      },
+                      '100%': {
+                        boxShadow: '0 4px 12px rgba(255, 179, 0, 0.3)',
+                      },
+                    }
+                  }}
+                />
+                <Typography variant="body2" sx={{ color: 'text.secondary', fontStyle: 'italic' }}>
+                  Now with beautiful, categorized images for all food types!
+                </Typography>
+              </Box>
 
               {/* Search Bar */}
               <Box sx={{ mb: 4 }}>
