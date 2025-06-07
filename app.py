@@ -829,6 +829,9 @@ def suggest():
 def trending():
     """Get trending searches"""
     try:
+        # Ensure database connection
+        client, db = ensure_mongodb_connection()
+        
         # Check cache first
         if db is not None:
             trending_cache = db.trending_cache
@@ -943,7 +946,8 @@ def handle_checkout_session(session):
         customer = stripe.Customer.retrieve(customer_id)
         subscription = stripe.Subscription.retrieve(subscription_id)
 
-        # Store subscription info in MongoDB
+        # Ensure database connection and store subscription info in MongoDB
+        client, db = ensure_mongodb_connection()
         if db is not None:
             subscriptions = db.subscriptions
             subscriptions.update_one(
@@ -974,6 +978,7 @@ def handle_subscription_updated(subscription):
         return
 
     try:
+        client, db = ensure_mongodb_connection()
         if db is not None:
             subscriptions = db.subscriptions
             subscriptions.update_one(
@@ -1000,6 +1005,7 @@ def handle_subscription_deleted(subscription):
         return
 
     try:
+        client, db = ensure_mongodb_connection()
         if db is not None:
             subscriptions = db.subscriptions
             subscriptions.update_one(
@@ -1020,6 +1026,7 @@ def handle_invoice_paid(invoice):
         return
 
     try:
+        client, db = ensure_mongodb_connection()
         if db is not None:
             # Update subscription payment status
             subscriptions = db.subscriptions
@@ -1061,6 +1068,7 @@ def handle_invoice_failed(invoice):
         return
 
     try:
+        client, db = ensure_mongodb_connection()
         if db is not None:
             # Update subscription payment status
             subscriptions = db.subscriptions
