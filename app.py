@@ -54,7 +54,16 @@ def connect_to_mongodb():
         return None, None
 
 
-client, db = connect_to_mongodb()
+# MongoDB connection - will be established lazily when needed
+client, db = None, None
+
+
+def ensure_mongodb_connection():
+    """Ensure MongoDB connection is established, connecting if needed"""
+    global client, db
+    if db is None:
+        client, db = connect_to_mongodb()
+    return client, db
 
 
 # --- Helper function to create a URL slug ---
@@ -166,6 +175,7 @@ def get_top_review(reviews_collection, recipe_id):
 # --- Helper function to log search queries ---
 def log_search_query(query, session_id, results_count=None):
     """Log search queries for trending calculation"""
+    client, db = ensure_mongodb_connection()
     if db is None:
         return
 
@@ -185,6 +195,7 @@ def log_search_query(query, session_id, results_count=None):
 # --- Helper function to calculate trending searches ---
 def calculate_trending_searches():
     """Calculate trending searches based on recent activity"""
+    client, db = ensure_mongodb_connection()
     if db is None:
         return []
 
@@ -288,12 +299,10 @@ def chat():
     except Exception as e:
         print(f"Failed to log search query: {e}")
 
-    global client, db
+    # Ensure database connection
+    client, db = ensure_mongodb_connection()
     if db is None:
-        print("Database connection is not available. Attempting to reconnect...")
-        client, db = connect_to_mongodb()
-        if db is None:
-            return jsonify({"reply": "Error: Could not connect to the database. Please check server logs."}), 500
+        return jsonify({"reply": "Error: Could not connect to the database. Please check server logs."}), 500
 
     try:
         # Check for spell corrections
@@ -757,7 +766,7 @@ def suggest():
         print("[Suggest Route] Query too short or empty, returning empty list.")
         return jsonify([])
 
-    global db
+    client, db = ensure_mongodb_connection()
     if db is None:
         print("[Suggest Route] DB connection is None, returning empty list.")
         return jsonify([])
@@ -1087,7 +1096,7 @@ def handle_invoice_failed(invoice):
 @app.route("/recipe/<recipe_id>/calories", methods=["GET"])
 def recipe_calorie_details(recipe_id):
     """Get detailed calorie breakdown for a specific recipe."""
-    global db
+    client, db = ensure_mongodb_connection()
     if db is None:
         return jsonify({"error": "Database connection not available"}), 500
 
@@ -1606,6 +1615,11 @@ def cuisine_search():
 
         # Use corrected query if available, otherwise use original
         search_query_text = corrected_query if has_corrections else query
+
+        # Ensure database connection
+        client, db = ensure_mongodb_connection()
+        if db is None:
+            return jsonify({"error": "Database connection not available"}), 500
 
         recipes_collection = db[os.getenv("RECIPES_COLLECTION", "recipes")]
 

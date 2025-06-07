@@ -145,7 +145,7 @@ jobs:
 
           # Test core functions work
           assert spell_correct_query('mali')['corrected'] == 'malai'
-          assert 'km' in calculate_walk_meter('100')
+          assert 'km' in calculate_walk_meter('100')['distance']
           assert estimate_serving_size('Pizza Fondue') == 6
 
           print('✅ Core functions working correctly')
