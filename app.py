@@ -265,7 +265,7 @@ def index():
         {
             "name": "Tastory API",
             "tagline": "The Food Search Engine",
-            "version": "1.0.0-beta",
+            "version": "1.1.0",
             "endpoints": {
                 "/chat": "Search for recipes using natural language",
                 "/suggest": "Get search suggestions as you type",
