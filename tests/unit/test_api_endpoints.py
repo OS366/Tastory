@@ -6,6 +6,7 @@ import json
 from unittest.mock import Mock, patch
 
 import pytest
+import stripe
 
 
 class TestChatEndpoint:
@@ -251,16 +252,16 @@ class TestStripeEndpoints:
         mock_stripe.assert_called_once()
 
     @pytest.mark.api
-    @patch("stripe.checkout.Session.create")
-    def test_create_checkout_session_error(self, mock_create, test_app):
+    def test_create_checkout_session_error(self, test_app):
         """Test checkout session creation with Stripe error."""
-        mock_create.side_effect = Exception("Stripe error")
+        with patch("stripe.checkout.Session.create") as mock_create:
+            mock_create.side_effect = Exception("Stripe error")
 
-        response = test_app.post("/create-checkout-session", data=json.dumps({}), content_type="application/json")
+            response = test_app.post("/create-checkout-session", data=json.dumps({}), content_type="application/json")
 
-        assert response.status_code == 403
-        data = json.loads(response.data)
-        assert "error" in data
+            assert response.status_code == 403
+            data = json.loads(response.data)
+            assert "error" in data
 
     @pytest.mark.api
     @patch("stripe.Webhook.construct_event")
@@ -281,8 +282,6 @@ class TestStripeEndpoints:
     @patch("stripe.Webhook.construct_event")
     def test_webhook_invalid_signature(self, mock_construct, test_app):
         """Test webhook with invalid signature."""
-        import stripe
-
         mock_construct.side_effect = stripe.error.SignatureVerificationError("Invalid signature", "sig_header")
 
         response = test_app.post("/webhook", data="test_payload", headers={"Stripe-Signature": "invalid_signature"})
