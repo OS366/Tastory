@@ -335,7 +335,7 @@ class TestErrorHandling:
         """Test endpoints when database is unavailable."""
         # Mock connection failure
         mock_connect.return_value = (None, None)
-        
+
         payload = {"message": "test", "page": 1}
 
         response = test_app.post("/chat", data=json.dumps(payload), content_type="application/json")
