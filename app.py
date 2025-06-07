@@ -208,6 +208,8 @@ def calculate_trending_searches():
         six_hours_ago = now - timedelta(hours=6)
         twenty_four_hours_ago = now - timedelta(hours=24)
 
+
+
         # Aggregation pipeline
         pipeline = [
             {"$match": {"timestamp": {"$gte": twenty_four_hours_ago}}},
@@ -219,7 +221,7 @@ def calculate_trending_searches():
                     "medium_count": {"$sum": {"$cond": [{"$gte": ["$timestamp", six_hours_ago]}, 1, 0]}},
                 }
             },
-            {"$match": {"total_count": {"$gte": 5}}},  # Minimum 5 searches to qualify
+            {"$match": {"total_count": {"$gte": 2}}},  # Lowered from 5 to 2 searches to qualify
             {
                 "$addFields": {
                     "score": {
@@ -243,10 +245,21 @@ def calculate_trending_searches():
 
         trending = list(search_logs.aggregate(pipeline))
 
+        # If no trending searches, fallback to most recent unique searches
+        if not trending:
+            fallback_pipeline = [
+                {"$match": {"timestamp": {"$gte": twenty_four_hours_ago}}},
+                {"$group": {"_id": "$query", "count": {"$sum": 1}, "latest": {"$max": "$timestamp"}}},
+                {"$sort": {"count": -1, "latest": -1}},
+                {"$limit": 5},
+                {"$project": {"_id": 0, "query": "$_id", "count": "$count", "score": "$count"}},
+            ]
+            trending = list(search_logs.aggregate(fallback_pipeline))
+
         # Calculate trend direction
         for item in trending:
             # This is simplified - in production, you'd compare with previous period
-            if item.get("score", 0) > 10:
+            if item.get("score", 0) > 5:  # Lowered threshold
                 item["trend"] = "up"
             else:
                 item["trend"] = "stable"
@@ -832,15 +845,15 @@ def trending():
         # Ensure database connection
         client, db = ensure_mongodb_connection()
         
-        # Check cache first
+        # Check cache first  
         if db is not None:
             trending_cache = db.trending_cache
             cache_doc = trending_cache.find_one({"_id": "current"})
 
-            # Use cache if it's less than 15 minutes old
+            # Use cache if it's less than 5 minutes old (reduced for faster updates)
             if cache_doc:
                 cache_age = datetime.utcnow() - cache_doc.get("updated_at", datetime.min)
-                if cache_age < timedelta(minutes=15):
+                if cache_age < timedelta(minutes=5):
                     return jsonify(
                         {
                             "trending": cache_doc.get("trending", []),
