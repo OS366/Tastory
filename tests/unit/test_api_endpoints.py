@@ -257,10 +257,10 @@ class TestStripeEndpoints:
         # Create a mock checkout module that raises an exception
         mock_session = Mock()
         mock_session.create.side_effect = Exception("Stripe error")
-        
+
         mock_checkout = Mock()
         mock_checkout.Session = mock_session
-        
+
         with patch("stripe.checkout", mock_checkout):
             response = test_app.post("/create-checkout-session", data=json.dumps({}), content_type="application/json")
 
@@ -274,10 +274,10 @@ class TestStripeEndpoints:
         mock_event = Mock()
         mock_event.type = "checkout.session.completed"
         mock_event.data.object = {"customer": "cus_test", "subscription": "sub_test"}
-        
+
         mock_webhook = Mock()
         mock_webhook.construct_event.return_value = mock_event
-        
+
         with patch("stripe.Webhook", mock_webhook):
             response = test_app.post("/webhook", data="test_payload", headers={"Stripe-Signature": "test_signature"})
 
@@ -289,8 +289,10 @@ class TestStripeEndpoints:
     def test_webhook_invalid_signature(self, test_app):
         """Test webhook with invalid signature."""
         mock_webhook = Mock()
-        mock_webhook.construct_event.side_effect = stripe.error.SignatureVerificationError("Invalid signature", "sig_header")
-        
+        mock_webhook.construct_event.side_effect = stripe.error.SignatureVerificationError(
+            "Invalid signature", "sig_header"
+        )
+
         with patch("stripe.Webhook", mock_webhook):
             response = test_app.post("/webhook", data="test_payload", headers={"Stripe-Signature": "invalid_signature"})
 

@@ -196,10 +196,10 @@ def mock_stripe():
     # Create a mock checkout module with Session class
     mock_session = Mock()
     mock_session.create.return_value = Mock(id="cs_test_123")
-    
+
     mock_checkout = Mock()
     mock_checkout.Session = mock_session
-    
+
     with patch("stripe.checkout", mock_checkout):
         yield mock_session.create
 

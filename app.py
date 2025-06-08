@@ -208,8 +208,6 @@ def calculate_trending_searches():
         six_hours_ago = now - timedelta(hours=6)
         twenty_four_hours_ago = now - timedelta(hours=24)
 
-
-
         # Aggregation pipeline
         pipeline = [
             {"$match": {"timestamp": {"$gte": twenty_four_hours_ago}}},
@@ -844,8 +842,8 @@ def trending():
     try:
         # Ensure database connection
         client, db = ensure_mongodb_connection()
-        
-        # Check cache first  
+
+        # Check cache first
         if db is not None:
             trending_cache = db.trending_cache
             cache_doc = trending_cache.find_one({"_id": "current"})
