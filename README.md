@@ -143,16 +143,19 @@ Try these searches to see Tastory in action:
 
 ## 📄 License
 
-Tastory is available under dual licensing:
+This project is licensed under the MIT License.
 
-### Open Source License (AGPL-3.0)
+### MIT License
 
-The open-source version is licensed under the GNU Affero General Public License v3.0. This means you can:
+The MIT License is a permissive free software license. This means you can:
 
-- Use the software for non-commercial purposes
+- Use the software for any purpose (commercial or non-commercial)
 - Modify the code
 - Distribute the code
-- Must keep the source code open source if you distribute it
+- Include in proprietary software
+- No obligation to make source code available
+
+See the [LICENSE](LICENSE) file for the full license text.
 
 ## Contributing
 
