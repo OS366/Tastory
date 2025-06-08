@@ -17,12 +17,15 @@ from flask_cors import CORS
 # Import our nutritional database
 try:
     from nutritional_database import calculate_recipe_calories
+
     NUTRITIONAL_DB_AVAILABLE = True
 except ImportError:
     print("Warning: nutritional_database module not available. Calorie calculation will be disabled.")
     NUTRITIONAL_DB_AVAILABLE = False
+
     def calculate_recipe_calories(*args, **kwargs):
         return None
+
 
 app = Flask(__name__)
 CORS(app)
@@ -51,7 +54,16 @@ def connect_to_mongodb():
         return None, None
 
 
-client, db = connect_to_mongodb()
+# MongoDB connection - will be established lazily when needed
+client, db = None, None
+
+
+def ensure_mongodb_connection():
+    """Ensure MongoDB connection is established, connecting if needed"""
+    global client, db
+    if db is None:
+        client, db = connect_to_mongodb()
+    return client, db
 
 
 # --- Helper function to create a URL slug ---
@@ -163,9 +175,10 @@ def get_top_review(reviews_collection, recipe_id):
 # --- Helper function to log search queries ---
 def log_search_query(query, session_id, results_count=None):
     """Log search queries for trending calculation"""
+    client, db = ensure_mongodb_connection()
     if db is None:
         return
-    
+
     try:
         search_logs = db.search_logs
         log_entry = {
@@ -182,18 +195,19 @@ def log_search_query(query, session_id, results_count=None):
 # --- Helper function to calculate trending searches ---
 def calculate_trending_searches():
     """Calculate trending searches based on recent activity"""
+    client, db = ensure_mongodb_connection()
     if db is None:
         return []
-    
+
     try:
         search_logs = db.search_logs
-        
+
         # Time windows
         now = datetime.utcnow()
         one_hour_ago = now - timedelta(hours=1)
         six_hours_ago = now - timedelta(hours=6)
         twenty_four_hours_ago = now - timedelta(hours=24)
-        
+
         # Aggregation pipeline
         pipeline = [
             {"$match": {"timestamp": {"$gte": twenty_four_hours_ago}}},
@@ -205,7 +219,7 @@ def calculate_trending_searches():
                     "medium_count": {"$sum": {"$cond": [{"$gte": ["$timestamp", six_hours_ago]}, 1, 0]}},
                 }
             },
-            {"$match": {"total_count": {"$gte": 5}}},  # Minimum 5 searches to qualify
+            {"$match": {"total_count": {"$gte": 2}}},  # Lowered from 5 to 2 searches to qualify
             {
                 "$addFields": {
                     "score": {
@@ -226,20 +240,31 @@ def calculate_trending_searches():
             {"$limit": 10},
             {"$project": {"_id": 0, "query": "$_id", "count": "$total_count", "score": 1}},
         ]
-        
+
         trending = list(search_logs.aggregate(pipeline))
-        
+
+        # If no trending searches, fallback to most recent unique searches
+        if not trending:
+            fallback_pipeline = [
+                {"$match": {"timestamp": {"$gte": twenty_four_hours_ago}}},
+                {"$group": {"_id": "$query", "count": {"$sum": 1}, "latest": {"$max": "$timestamp"}}},
+                {"$sort": {"count": -1, "latest": -1}},
+                {"$limit": 5},
+                {"$project": {"_id": 0, "query": "$_id", "count": "$count", "score": "$count"}},
+            ]
+            trending = list(search_logs.aggregate(fallback_pipeline))
+
         # Calculate trend direction
         for item in trending:
             # This is simplified - in production, you'd compare with previous period
-            if item.get("score", 0) > 10:
+            if item.get("score", 0) > 5:  # Lowered threshold
                 item["trend"] = "up"
             else:
                 item["trend"] = "stable"
             item["percentChange"] = 0  # Placeholder
-        
+
         return trending
-        
+
     except Exception as e:
         print(f"Error calculating trending searches: {e}")
         return []
@@ -251,7 +276,7 @@ def index():
         {
             "name": "Tastory API",
             "tagline": "The Food Search Engine",
-            "version": "1.0.0-beta",
+            "version": "1.1.0",
             "endpoints": {
                 "/chat": "Search for recipes using natural language",
                 "/suggest": "Get search suggestions as you type",
@@ -285,12 +310,10 @@ def chat():
     except Exception as e:
         print(f"Failed to log search query: {e}")
 
-    global client, db
+    # Ensure database connection
+    client, db = ensure_mongodb_connection()
     if db is None:
-        print("Database connection is not available. Attempting to reconnect...")
-        client, db = connect_to_mongodb()
-        if db is None:
-            return jsonify({"reply": "Error: Could not connect to the database. Please check server logs."}), 500
+        return jsonify({"reply": "Error: Could not connect to the database. Please check server logs."}), 500
 
     try:
         # Check for spell corrections
@@ -305,10 +328,10 @@ def chat():
 
         # Use corrected query if available, otherwise use original
         search_query_text = corrected_query if has_corrections else user_message
-        
+
         # Split the query into words for exact matching
         search_terms = search_query_text.lower().split()
-        
+
         # Define cuisine categories and their related terms
         cuisine_categories = {
             "indian": [
@@ -369,11 +392,11 @@ def chat():
         query_terms = user_message.lower().split()
         detected_cuisine = None
         original_query_lower = user_message.lower()
-        
+
         for cuisine, terms in cuisine_categories.items():
             # Check both individual words and the full query for multi-word terms
             cuisine_match = False
-            
+
             # Check if any cuisine term appears in the original query
             for term in terms:
                 if term in original_query_lower:
@@ -386,7 +409,7 @@ def chat():
                     if any(search_term in term.lower() for term in terms):
                         cuisine_match = True
                         break
-            
+
             if cuisine_match:
                 detected_cuisine = cuisine
                 break
@@ -398,10 +421,10 @@ def chat():
         # For each term in the user's query, search across multiple fields
         for term in search_terms:
             term_conditions = {
-                        "$or": [
-                        {"Name": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
-                        {"RecipeCategory": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
-                        {"Keywords": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
+                "$or": [
+                    {"Name": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
+                    {"RecipeCategory": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
+                    {"Keywords": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
                     {"RecipeIngredientParts": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
                     {"Description": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
                 ]
@@ -418,7 +441,7 @@ def chat():
         # Execute search
         results = list(
             recipes_collection.find(
-            search_query,
+                search_query,
                 {
                     "_id": 0,
                     "RecipeId": 1,
@@ -472,7 +495,7 @@ def chat():
 
         # Combine results with images first
         sorted_results = recipes_with_images + recipes_without_images
-        
+
         # Calculate pagination
         total_results = len(sorted_results)
         total_pages = max(1, min(3, math.ceil(total_results / per_page)))
@@ -511,7 +534,7 @@ def chat():
             ingredients = []
             ingredients_data = recipe.get("RecipeIngredientParts")
             quantities_data = recipe.get("RecipeIngredientQuantities")
-            
+
             # Parse ingredient names
             ingredient_names = []
             if isinstance(ingredients_data, list):
@@ -544,7 +567,7 @@ def chat():
                         ingredient_names.append(ingredients_data.strip())
                 except json.JSONDecodeError:
                     ingredient_names.append(ingredients_data.strip())
-            
+
             # Parse quantities
             quantities = []
             if isinstance(quantities_data, list):
@@ -577,7 +600,7 @@ def chat():
                         quantities.append(quantities_data.strip())
                 except json.JSONDecodeError:
                     quantities.append(quantities_data.strip())
-            
+
             # Combine ingredients with quantities
             for i, name in enumerate(ingredient_names):
                 if i < len(quantities) and quantities[i] and quantities[i].lower() != "nan":
@@ -586,14 +609,14 @@ def chat():
                 else:
                     # Just the ingredient name if no quantity available
                     ingredients.append(name)
-            
+
             # If no image found, leave image_url as None (will show "no image found" in frontend)
             # Removed automatic image generation to revert to old concept
 
             # Process instructions - parse JSON strings properly
             instructions = []
             instructions_data = recipe.get("RecipeInstructions", [])
-            
+
             if isinstance(instructions_data, list):
                 for item in instructions_data:
                     if isinstance(item, str):
@@ -628,24 +651,24 @@ def chat():
             # Process calories - combine existing and calculated
             existing_calories = recipe.get("Calories")
             servings = safe_get_servings(recipe)
-            
+
             # Calculate calories from ingredients
             calculated_calories = None
             try:
                 ingredients_data = recipe.get("RecipeIngredientParts")
                 quantities_data = recipe.get("RecipeIngredientQuantities")
-                
+
                 if ingredients_data and quantities_data:
                     calc_result = calculate_recipe_calories(ingredients_data, quantities_data, servings)
                     if calc_result:
                         calculated_calories = calc_result["calories_per_serving"]
             except Exception as e:
                 print(f"Error calculating calories for recipe {recipe.get('RecipeId')}: {e}")
-            
+
             # Determine which calorie value to display - PRIORITIZE CALCULATED CALORIES
             calories_display = "N/A"
             calorie_source = "none"
-            
+
             # First try to use calculated calories (user preference)
             if calculated_calories:
                 calories_display = f"{calculated_calories:.0f}"
@@ -754,7 +777,7 @@ def suggest():
         print("[Suggest Route] Query too short or empty, returning empty list.")
         return jsonify([])
 
-    global db
+    client, db = ensure_mongodb_connection()
     if db is None:
         print("[Suggest Route] DB connection is None, returning empty list.")
         return jsonify([])
@@ -817,25 +840,28 @@ def suggest():
 def trending():
     """Get trending searches"""
     try:
+        # Ensure database connection
+        client, db = ensure_mongodb_connection()
+
         # Check cache first
         if db is not None:
             trending_cache = db.trending_cache
             cache_doc = trending_cache.find_one({"_id": "current"})
-            
-            # Use cache if it's less than 15 minutes old
+
+            # Use cache if it's less than 5 minutes old (reduced for faster updates)
             if cache_doc:
                 cache_age = datetime.utcnow() - cache_doc.get("updated_at", datetime.min)
-                if cache_age < timedelta(minutes=15):
+                if cache_age < timedelta(minutes=5):
                     return jsonify(
                         {
-                        "trending": cache_doc.get("trending", []),
+                            "trending": cache_doc.get("trending", []),
                             "lastUpdated": cache_doc.get("updated_at").isoformat() + "Z",
                         }
                     )
-        
+
         # Calculate fresh trending data
         trending_data = calculate_trending_searches()
-        
+
         # Update cache
         if db is not None:
             trending_cache = db.trending_cache
@@ -846,7 +872,7 @@ def trending():
             )
 
         return jsonify({"trending": trending_data, "lastUpdated": datetime.utcnow().isoformat() + "Z"})
-        
+
     except Exception as e:
         print(f"Error in /trending endpoint: {e}")
         return jsonify({"error": "Failed to fetch trending searches"}), 500
@@ -921,17 +947,18 @@ def handle_checkout_session(session):
     """Handle successful checkout session."""
     customer_id = session.get("customer")
     subscription_id = session.get("subscription")
-    
+
     if not customer_id or not subscription_id:
         logging.error("Missing customer_id or subscription_id in session")
         return
-    
+
     try:
         # Get customer details
         customer = stripe.Customer.retrieve(customer_id)
         subscription = stripe.Subscription.retrieve(subscription_id)
-        
-        # Store subscription info in MongoDB
+
+        # Ensure database connection and store subscription info in MongoDB
+        client, db = ensure_mongodb_connection()
         if db is not None:
             subscriptions = db.subscriptions
             subscriptions.update_one(
@@ -956,12 +983,13 @@ def handle_subscription_updated(subscription):
     """Handle subscription updates."""
     customer_id = subscription.get("customer")
     subscription_id = subscription.get("id")
-    
+
     if not customer_id or not subscription_id:
         logging.error("Missing customer_id or subscription_id in subscription update")
         return
-        
+
     try:
+        client, db = ensure_mongodb_connection()
         if db is not None:
             subscriptions = db.subscriptions
             subscriptions.update_one(
@@ -982,12 +1010,13 @@ def handle_subscription_deleted(subscription):
     """Handle subscription cancellations."""
     customer_id = subscription.get("customer")
     subscription_id = subscription.get("id")
-    
+
     if not customer_id or not subscription_id:
         logging.error("Missing customer_id or subscription_id in subscription deletion")
         return
-        
+
     try:
+        client, db = ensure_mongodb_connection()
         if db is not None:
             subscriptions = db.subscriptions
             subscriptions.update_one(
@@ -1002,12 +1031,13 @@ def handle_invoice_paid(invoice):
     """Handle successful invoice payments."""
     customer_id = invoice.get("customer")
     subscription_id = invoice.get("subscription")
-    
+
     if not customer_id or not subscription_id:
         logging.error("Missing customer_id or subscription_id in invoice")
         return
-        
+
     try:
+        client, db = ensure_mongodb_connection()
         if db is not None:
             # Update subscription payment status
             subscriptions = db.subscriptions
@@ -1021,7 +1051,7 @@ def handle_invoice_paid(invoice):
                     }
                 },
             )
-            
+
             # Store invoice record
             invoices = db.invoices
             invoices.insert_one(
@@ -1043,12 +1073,13 @@ def handle_invoice_failed(invoice):
     """Handle failed invoice payments."""
     customer_id = invoice.get("customer")
     subscription_id = invoice.get("subscription")
-    
+
     if not customer_id or not subscription_id:
         logging.error("Missing customer_id or subscription_id in failed invoice")
         return
-        
+
     try:
+        client, db = ensure_mongodb_connection()
         if db is not None:
             # Update subscription payment status
             subscriptions = db.subscriptions
@@ -1062,7 +1093,7 @@ def handle_invoice_failed(invoice):
                     }
                 },
             )
-            
+
             # Store failed invoice record
             invoices = db.invoices
             invoices.insert_one(
@@ -1084,13 +1115,13 @@ def handle_invoice_failed(invoice):
 @app.route("/recipe/<recipe_id>/calories", methods=["GET"])
 def recipe_calorie_details(recipe_id):
     """Get detailed calorie breakdown for a specific recipe."""
-    global db
+    client, db = ensure_mongodb_connection()
     if db is None:
         return jsonify({"error": "Database connection not available"}), 500
 
     try:
         recipes_collection = db[os.getenv("RECIPES_COLLECTION", "recipes")]
-        
+
         # Find the recipe - try both string and numeric formats
         recipe_query = {"RecipeId": int(recipe_id)} if recipe_id.isdigit() else {"RecipeId": recipe_id}
         recipe = recipes_collection.find_one(
@@ -1104,16 +1135,16 @@ def recipe_calorie_details(recipe_id):
                 "RecipeYield": 1,
             },
         )
-        
+
         if not recipe:
             return jsonify({"error": "Recipe not found"}), 404
-        
+
         # Calculate detailed calorie breakdown
         ingredients_data = recipe.get("RecipeIngredientParts")
-        quantities_data = recipe.get("RecipeIngredientQuantities") 
+        quantities_data = recipe.get("RecipeIngredientQuantities")
         servings = safe_get_servings(recipe)
         existing_calories = recipe.get("Calories")
-        
+
         calc_result = None
         try:
             if NUTRITIONAL_DB_AVAILABLE:
@@ -1121,7 +1152,7 @@ def recipe_calorie_details(recipe_id):
         except Exception as e:
             print(f"Error calculating calories for recipe {recipe_id}: {e}")
             calc_result = None
-        
+
         response = {
             "recipe": {"id": recipe_id, "name": recipe.get("Name"), "servings": servings},
             "existingCalories": {
@@ -1131,18 +1162,18 @@ def recipe_calorie_details(recipe_id):
             "calculatedCalories": calc_result,
             "accuracy": None,
         }
-        
+
         # Calculate accuracy if both values exist
         if existing_calories and calc_result:
             existing_per_serving = existing_calories / servings
             calculated_per_serving = calc_result["calories_per_serving"]
-            
+
             if existing_per_serving > 0:
                 accuracy = (1 - abs(existing_per_serving - calculated_per_serving) / existing_per_serving) * 100
                 response["accuracy"] = f"{accuracy:.1f}%"
-        
+
         return jsonify(response)
-        
+
     except Exception as e:
         print(f"Error getting calorie details: {e}")
         return jsonify({"error": "Failed to calculate calorie details"}), 500
@@ -1604,8 +1635,13 @@ def cuisine_search():
         # Use corrected query if available, otherwise use original
         search_query_text = corrected_query if has_corrections else query
 
+        # Ensure database connection
+        client, db = ensure_mongodb_connection()
+        if db is None:
+            return jsonify({"error": "Database connection not available"}), 500
+
         recipes_collection = db[os.getenv("RECIPES_COLLECTION", "recipes")]
-        
+
         # Define cuisine categories
         cuisine_mapping = {
             "indian": [
@@ -1666,24 +1702,24 @@ def cuisine_search():
         query_terms = search_query_text.lower().split()
         detected_cuisine = None
         original_query_lower = search_query_text.lower()
-        
+
         for cuisine, terms in cuisine_mapping.items():
             # Check both individual words and the full query for multi-word terms
             cuisine_match = False
-            
+
             # Check if any cuisine term appears in the original query
             for term in terms:
                 if term in original_query_lower:
                     cuisine_match = True
                     break
-            
+
             # Also check if any search term matches any cuisine term
             if not cuisine_match:
                 for search_term in query_terms:
                     if any(search_term in term.lower() for term in terms):
                         cuisine_match = True
                         break
-            
+
             if cuisine_match:
                 detected_cuisine = cuisine
                 break
@@ -1693,42 +1729,42 @@ def cuisine_search():
 
         # Create search query with improved regex handling
         cuisine_terms = cuisine_mapping[detected_cuisine]
-        
+
         # Split multi-word terms and single-word terms for better regex handling
         single_word_terms = []
         multi_word_terms = []
-        
+
         for term in cuisine_terms:
             if " " in term:
                 multi_word_terms.append(term)
             else:
                 single_word_terms.append(term)
-        
+
         # Build cuisine conditions
         cuisine_conditions = []
-        
+
         # Handle single-word terms
         if single_word_terms:
             single_word_pattern = f"({'|'.join(re.escape(term) for term in single_word_terms)})"
             cuisine_conditions.extend(
                 [
-                {"RecipeCategory": {"$regex": single_word_pattern, "$options": "i"}},
-                {"Keywords": {"$regex": single_word_pattern, "$options": "i"}},
+                    {"RecipeCategory": {"$regex": single_word_pattern, "$options": "i"}},
+                    {"Keywords": {"$regex": single_word_pattern, "$options": "i"}},
                     {"Name": {"$regex": single_word_pattern, "$options": "i"}},
                 ]
             )
-        
+
         # Handle multi-word terms separately
         for multi_term in multi_word_terms:
             escaped_term = re.escape(multi_term)
             cuisine_conditions.extend(
                 [
-                {"RecipeCategory": {"$regex": escaped_term, "$options": "i"}},
-                {"Keywords": {"$regex": escaped_term, "$options": "i"}},
+                    {"RecipeCategory": {"$regex": escaped_term, "$options": "i"}},
+                    {"Keywords": {"$regex": escaped_term, "$options": "i"}},
                     {"Name": {"$regex": escaped_term, "$options": "i"}},
                 ]
             )
-        
+
         search_query = {
             "$and": [
                 # Must match the cuisine type
@@ -1736,12 +1772,12 @@ def cuisine_search():
                 # Must match all search terms
                 *[
                     {
-                    "$or": [
-                        {"Name": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
-                        {"RecipeCategory": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
-                        {"Keywords": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
+                        "$or": [
+                            {"Name": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
+                            {"RecipeCategory": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
+                            {"Keywords": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
                             {"RecipeIngredientParts": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
-                    ]
+                        ]
                     }
                     for term in query_terms
                 ],
@@ -1751,34 +1787,34 @@ def cuisine_search():
         # Execute search
         results = list(
             recipes_collection.find(
-            search_query,
-            {
-                "_id": 0,
-                "RecipeId": 1,
-                "Name": 1,
-                "Description": 1,
-                "RecipeIngredientParts": 1,
-                "RecipeIngredientQuantities": 1,
-                "RecipeInstructions": 1,
-                "Images": 1,
-                "MainImage": 1,
-                "Calories": 1,
-                "AuthorName": 1,
-                "DatePublished": 1,
-                "RecipeServings": 1,
-                "RecipeYield": 1,
-                "PrepTime": 1,
-                "RecipeCategory": 1,
-                "FatContent": 1,
-                "SaturatedFatContent": 1,
-                "CholesterolContent": 1,
-                "SodiumContent": 1,
-                "CarbohydrateContent": 1,
-                "FiberContent": 1,
-                "SugarContent": 1,
-                "ProteinContent": 1,
-                "AggregatedRating": 1,
-                "ReviewCount": 1,
+                search_query,
+                {
+                    "_id": 0,
+                    "RecipeId": 1,
+                    "Name": 1,
+                    "Description": 1,
+                    "RecipeIngredientParts": 1,
+                    "RecipeIngredientQuantities": 1,
+                    "RecipeInstructions": 1,
+                    "Images": 1,
+                    "MainImage": 1,
+                    "Calories": 1,
+                    "AuthorName": 1,
+                    "DatePublished": 1,
+                    "RecipeServings": 1,
+                    "RecipeYield": 1,
+                    "PrepTime": 1,
+                    "RecipeCategory": 1,
+                    "FatContent": 1,
+                    "SaturatedFatContent": 1,
+                    "CholesterolContent": 1,
+                    "SodiumContent": 1,
+                    "CarbohydrateContent": 1,
+                    "FiberContent": 1,
+                    "SugarContent": 1,
+                    "ProteinContent": 1,
+                    "AggregatedRating": 1,
+                    "ReviewCount": 1,
                 },
             ).limit(30)
         )
@@ -1805,7 +1841,7 @@ def cuisine_search():
 
         # Combine results with images first
         sorted_results = recipes_with_images + recipes_without_images
-        
+
         # Calculate pagination
         total_results = len(sorted_results)
         total_pages = max(1, min(3, math.ceil(total_results / per_page)))
@@ -1834,7 +1870,7 @@ def cuisine_search():
             ingredients = []
             ingredients_data = recipe.get("RecipeIngredientParts")
             quantities_data = recipe.get("RecipeIngredientQuantities")
-            
+
             # Parse ingredient names
             ingredient_names = []
             if isinstance(ingredients_data, list):
@@ -1867,7 +1903,7 @@ def cuisine_search():
                         ingredient_names.append(ingredients_data.strip())
                 except json.JSONDecodeError:
                     ingredient_names.append(ingredients_data.strip())
-            
+
             # Parse quantities
             quantities = []
             if isinstance(quantities_data, list):
@@ -1900,7 +1936,7 @@ def cuisine_search():
                         quantities.append(quantities_data.strip())
                 except json.JSONDecodeError:
                     quantities.append(quantities_data.strip())
-            
+
             # Combine ingredients with quantities
             for i, name in enumerate(ingredient_names):
                 if i < len(quantities) and quantities[i] and quantities[i].lower() != "nan":
@@ -1909,14 +1945,14 @@ def cuisine_search():
                 else:
                     # Just the ingredient name if no quantity available
                     ingredients.append(name)
-            
+
             # If no image found, leave image_url as None (will show "no image found" in frontend)
             # Removed automatic image generation to revert to old concept
 
             # Process instructions - parse JSON strings properly
             instructions = []
             instructions_data = recipe.get("RecipeInstructions", [])
-            
+
             if isinstance(instructions_data, list):
                 for item in instructions_data:
                     if isinstance(item, str):
@@ -1951,24 +1987,24 @@ def cuisine_search():
             # Process calories - combine existing and calculated
             existing_calories = recipe.get("Calories")
             servings = safe_get_servings(recipe)
-            
+
             # Calculate calories from ingredients
             calculated_calories = None
             try:
                 ingredients_data = recipe.get("RecipeIngredientParts")
                 quantities_data = recipe.get("RecipeIngredientQuantities")
-                
+
                 if ingredients_data and quantities_data:
                     calc_result = calculate_recipe_calories(ingredients_data, quantities_data, servings)
                     if calc_result:
                         calculated_calories = calc_result["calories_per_serving"]
             except Exception as e:
                 print(f"Error calculating calories for recipe {recipe.get('RecipeId')}: {e}")
-            
+
             # Determine which calorie value to display - PRIORITIZE CALCULATED CALORIES
             calories_display = "N/A"
             calorie_source = "none"
-            
+
             # First try to use calculated calories (user preference)
             if calculated_calories:
                 calories_display = f"{calculated_calories:.0f}"

@@ -193,9 +193,15 @@ def populated_db(mock_db, sample_recipes, sample_reviews):
 @pytest.fixture
 def mock_stripe():
     """Mock Stripe for payment testing."""
-    with patch("stripe.checkout.Session.create") as mock_create:
-        mock_create.return_value = Mock(id="cs_test_123")
-        yield mock_create
+    # Create a mock checkout module with Session class
+    mock_session = Mock()
+    mock_session.create.return_value = Mock(id="cs_test_123")
+
+    mock_checkout = Mock()
+    mock_checkout.Session = mock_session
+
+    with patch("stripe.checkout", mock_checkout):
+        yield mock_session.create
 
 
 @pytest.fixture
@@ -233,20 +239,20 @@ def sample_search_queries():
 def reset_environment():
     """Reset environment variables after each test but preserve test config."""
     original_env = os.environ.copy()
-    
+
     # Set test configuration environment variables
     test_env_vars = {
         "TESTING": "True",
-        "DB_NAME": "tastory_test", 
+        "DB_NAME": "tastory_test",
         "RECIPES_COLLECTION": "recipes_test",
-        "REVIEWS_COLLECTION": "reviews_test"
+        "REVIEWS_COLLECTION": "reviews_test",
     }
-    
+
     # Apply test environment
     os.environ.update(test_env_vars)
-    
+
     yield
-    
+
     # Reset but preserve test config
     os.environ.clear()
     os.environ.update(original_env)

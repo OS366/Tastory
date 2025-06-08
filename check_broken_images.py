@@ -4,11 +4,13 @@ Check Broken Images - Test which pizza image URLs are working
 """
 
 import os
-import requests
+
 import pymongo
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
+
 
 def test_image_url(url):
     """Test if an image URL is accessible"""
@@ -18,34 +20,34 @@ def test_image_url(url):
     except Exception as e:
         return False
 
+
 def main():
-    client = pymongo.MongoClient(os.getenv('MONGODB_URI'))
-    db = client[os.getenv('DB_NAME', 'tastory')]
-    collection = db[os.getenv('RECIPES_COLLECTION', 'recipes')]
+    client = pymongo.MongoClient(os.getenv("MONGODB_URI"))
+    db = client[os.getenv("DB_NAME", "tastory")]
+    collection = db[os.getenv("RECIPES_COLLECTION", "recipes")]
 
     # Get pizza recipes with images
-    pizzas = list(collection.find({
-        "$and": [
-            {"Name": {"$regex": "pizza", "$options": "i"}},
-            {"MainImage": {"$exists": True, "$ne": ""}}
-        ]
-    }))
+    pizzas = list(
+        collection.find(
+            {"$and": [{"Name": {"$regex": "pizza", "$options": "i"}}, {"MainImage": {"$exists": True, "$ne": ""}}]}
+        )
+    )
 
-    print(f'🍕 Testing {len(pizzas)} pizza image URLs...')
+    print(f"🍕 Testing {len(pizzas)} pizza image URLs...")
     print("=" * 50)
 
     working_count = 0
     broken_count = 0
 
     for pizza in pizzas:
-        name = pizza.get('Name', 'Unknown')
-        image_url = pizza.get('MainImage', '')
-        recipe_id = pizza.get('RecipeId')
-        
+        name = pizza.get("Name", "Unknown")
+        image_url = pizza.get("MainImage", "")
+        recipe_id = pizza.get("RecipeId")
+
         if image_url:
             print(f"\n📋 {name} (ID: {recipe_id})")
             print(f"   URL: {image_url}")
-            
+
             is_working = test_image_url(image_url)
             if is_working:
                 print(f"   ✅ Working")
@@ -65,5 +67,6 @@ def main():
 
     client.close()
 
+
 if __name__ == "__main__":
-    main() 
+    main()
