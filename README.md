@@ -171,4 +171,3 @@ Tastory is developed by [David Labs](https://www.davidlabs.ca), a company dedica
   <strong>Tastory - The Food Search Engine</strong><br>
   Making recipe discovery as easy as web search.
 </p>
-# Fix: Ensure nutritional_database.py is deployed to production
