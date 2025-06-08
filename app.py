@@ -26,6 +26,15 @@ except ImportError:
     def calculate_recipe_calories(*args, **kwargs):
         return None
 
+# Google Vertex AI imports for embeddings
+try:
+    import vertexai
+    from vertexai.language_models import TextEmbeddingModel
+    VERTEX_AI_AVAILABLE = True
+except ImportError:
+    VERTEX_AI_AVAILABLE = False
+    print("Warning: Vertex AI not available. Install with: pip install google-cloud-aiplatform vertexai")
+
 
 app = Flask(__name__)
 CORS(app)
@@ -33,6 +42,51 @@ CORS(app)
 # Initialize Stripe
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
+
+# --- Vertex AI Configuration ---
+vertex_model = None
+
+def init_vertex_ai():
+    """Initialize Vertex AI for embeddings"""
+    global vertex_model
+    if not VERTEX_AI_AVAILABLE:
+        return None
+    
+    try:
+        load_dotenv()
+        project_id = os.getenv("GOOGLE_CLOUD_PROJECT", "tastory-404614")
+        location = os.getenv("GOOGLE_CLOUD_REGION", "us-central1")
+        
+        # Initialize Vertex AI
+        vertexai.init(project=project_id, location=location)
+        
+        # Load the text embedding model
+        vertex_model = TextEmbeddingModel.from_pretrained("textembedding-gecko@003")
+        print("Successfully initialized Vertex AI with textembedding-gecko@003")
+        return vertex_model
+    except Exception as e:
+        print(f"Error initializing Vertex AI: {e}")
+        return None
+
+def generate_query_embedding(query_text):
+    """Generate embedding for search query using Vertex AI"""
+    global vertex_model
+    
+    if not vertex_model:
+        vertex_model = init_vertex_ai()
+    
+    if not vertex_model:
+        return None
+        
+    try:
+        # Generate embedding
+        embeddings = vertex_model.get_embeddings([query_text])
+        if embeddings and len(embeddings) > 0:
+            return embeddings[0].values
+        return None
+    except Exception as e:
+        print(f"Error generating query embedding: {e}")
+        return None
 
 
 # --- MongoDB Connection ---
@@ -64,6 +118,68 @@ def ensure_mongodb_connection():
     if db is None:
         client, db = connect_to_mongodb()
     return client, db
+
+def vector_search_recipes(query_embedding, limit=30):
+    """Perform vector similarity search using Vertex AI embeddings"""
+    client, db = ensure_mongodb_connection()
+    if db is None or not query_embedding:
+        return []
+    
+    try:
+        recipes_collection = db[os.getenv("RECIPES_COLLECTION", "recipes")]
+        
+        # MongoDB Atlas Vector Search aggregation pipeline
+        pipeline = [
+            {
+                "$vectorSearch": {
+                    "index": "recipe_embedding_index",  # Vector search index name
+                    "path": "recipe_embedding_google_vertex",  # Field containing embeddings
+                    "queryVector": query_embedding,
+                    "numCandidates": 100,  # Number of candidates to consider
+                    "limit": limit
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "RecipeId": 1,
+                    "Name": 1,
+                    "Description": 1,
+                    "RecipeIngredientParts": 1,
+                    "RecipeIngredientQuantities": 1,
+                    "RecipeInstructions": 1,
+                    "Images": 1,
+                    "MainImage": 1,
+                    "Calories": 1,
+                    "AuthorName": 1,
+                    "DatePublished": 1,
+                    "RecipeServings": 1,
+                    "RecipeYield": 1,
+                    "PrepTime": 1,
+                    "RecipeCategory": 1,
+                    "FatContent": 1,
+                    "SaturatedFatContent": 1,
+                    "CholesterolContent": 1,
+                    "SodiumContent": 1,
+                    "CarbohydrateContent": 1,
+                    "FiberContent": 1,
+                    "SugarContent": 1,
+                    "ProteinContent": 1,
+                    "AggregatedRating": 1,
+                    "ReviewCount": 1,
+                    "score": {"$meta": "vectorSearchScore"}  # Include similarity score
+                }
+            }
+        ]
+        
+        results = list(recipes_collection.aggregate(pipeline))
+        print(f"Vector search found {len(results)} results")
+        return results
+        
+    except Exception as e:
+        print(f"Error in vector search: {e}")
+        # Fallback to empty results rather than crashing
+        return []
 
 
 # --- Helper function to create a URL slug ---
@@ -414,64 +530,80 @@ def chat():
                 detected_cuisine = cuisine
                 break
 
-        # Create search query - use general search for all queries
-        # Build search conditions that work for any query
-        search_conditions = []
+        # Try Vector Search first (if Vertex AI is available)
+        results = []
+        use_vertex_search = os.getenv("USE_VERTEX_SEARCH", "true").lower() == "true"
+        
+        if use_vertex_search and VERTEX_AI_AVAILABLE:
+            print(f"Attempting Vertex AI vector search for: '{search_query_text}'")
+            query_embedding = generate_query_embedding(search_query_text)
+            
+            if query_embedding:
+                results = vector_search_recipes(query_embedding, limit=30)
+                print(f"Vector search returned {len(results)} results")
+            else:
+                print("Failed to generate query embedding, falling back to text search")
+        
+        # Fallback to regex-based text search if vector search fails or is disabled
+        if not results:
+            print("Using fallback text search")
+            # Build search conditions that work for any query
+            search_conditions = []
 
-        # For each term in the user's query, search across multiple fields
-        for term in search_terms:
-            term_conditions = {
-                "$or": [
-                    {"Name": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
-                    {"RecipeCategory": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
-                    {"Keywords": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
-                    {"RecipeIngredientParts": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
-                    {"Description": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
-                ]
-            }
-            search_conditions.append(term_conditions)
+            # For each term in the user's query, search across multiple fields
+            for term in search_terms:
+                term_conditions = {
+                    "$or": [
+                        {"Name": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
+                        {"RecipeCategory": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
+                        {"Keywords": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
+                        {"RecipeIngredientParts": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
+                        {"Description": {"$regex": f"\\b{re.escape(term)}\\b", "$options": "i"}},
+                    ]
+                }
+                search_conditions.append(term_conditions)
 
-        # Create final search query - must match at least one term
-        if search_conditions:
-            search_query = {"$or": search_conditions}
-        else:
-            # Fallback for empty search
-            search_query = {}
+            # Create final search query - must match at least one term
+            if search_conditions:
+                search_query = {"$or": search_conditions}
+            else:
+                # Fallback for empty search
+                search_query = {}
 
-        # Execute search
-        results = list(
-            recipes_collection.find(
-                search_query,
-                {
-                    "_id": 0,
-                    "RecipeId": 1,
-                    "Name": 1,
-                    "Description": 1,
-                    "RecipeIngredientParts": 1,
-                    "RecipeIngredientQuantities": 1,
-                    "RecipeInstructions": 1,
-                    "Images": 1,
-                    "MainImage": 1,
-                    "Calories": 1,
-                    "AuthorName": 1,
-                    "DatePublished": 1,
-                    "RecipeServings": 1,
-                    "RecipeYield": 1,
-                    "PrepTime": 1,
-                    "RecipeCategory": 1,
-                    "FatContent": 1,
-                    "SaturatedFatContent": 1,
-                    "CholesterolContent": 1,
-                    "SodiumContent": 1,
-                    "CarbohydrateContent": 1,
-                    "FiberContent": 1,
-                    "SugarContent": 1,
-                    "ProteinContent": 1,
-                    "AggregatedRating": 1,
-                    "ReviewCount": 1,
-                },
-            ).limit(30)
-        )
+            # Execute fallback search
+            results = list(
+                recipes_collection.find(
+                    search_query,
+                    {
+                        "_id": 0,
+                        "RecipeId": 1,
+                        "Name": 1,
+                        "Description": 1,
+                        "RecipeIngredientParts": 1,
+                        "RecipeIngredientQuantities": 1,
+                        "RecipeInstructions": 1,
+                        "Images": 1,
+                        "MainImage": 1,
+                        "Calories": 1,
+                        "AuthorName": 1,
+                        "DatePublished": 1,
+                        "RecipeServings": 1,
+                        "RecipeYield": 1,
+                        "PrepTime": 1,
+                        "RecipeCategory": 1,
+                        "FatContent": 1,
+                        "SaturatedFatContent": 1,
+                        "CholesterolContent": 1,
+                        "SodiumContent": 1,
+                        "CarbohydrateContent": 1,
+                        "FiberContent": 1,
+                        "SugarContent": 1,
+                        "ProteinContent": 1,
+                        "AggregatedRating": 1,
+                        "ReviewCount": 1,
+                    },
+                ).limit(30)
+            )
 
         # Process results
         recipes_with_images = []
