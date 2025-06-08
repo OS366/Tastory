@@ -95,13 +95,26 @@ jobs:
           coverage report --fail-under=20
           echo "Test coverage requirement: 20% minimum (temporary for CI stability)"
 
+      - name: Verify Coverage File
+        if: matrix.python-version == '3.11'
+        run: |
+          if [ -f "coverage.xml" ]; then
+            echo "✅ Coverage file found: coverage.xml"
+            ls -la coverage.xml
+          else
+            echo "⚠️  Coverage file not found"
+            ls -la *.xml || echo "No XML files found"
+          fi
+
       - name: Upload coverage reports to Codecov
         if: matrix.python-version == '3.11'
         uses: codecov/codecov-action@v4
         with:
           file: ./coverage.xml
-          fail_ci_if_error: true # Fail CI if coverage upload fails
+          token: ${{ secrets.CODECOV_TOKEN }} # Optional: add token if available
+          fail_ci_if_error: false # Don't fail CI if coverage upload fails
           verbose: true
+        continue-on-error: true # Don't block CI on Codecov issues
 
       - name: Generate Coverage Report
         if: matrix.python-version == '3.11'
