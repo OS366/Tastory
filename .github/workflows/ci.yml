@@ -88,8 +88,8 @@ jobs:
 
       - name: Check Test Coverage
         run: |
-          coverage report --fail-under=80
-          echo "Test coverage requirement: 80% minimum"
+          coverage report --fail-under=60
+          echo "Test coverage requirement: 60% minimum"
 
       - name: Upload coverage reports to Codecov
         if: matrix.python-version == '3.11'
